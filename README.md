@@ -80,6 +80,7 @@ llmtop --once --output json
 | **TensorRT-LLM** | ✅ Full | ✅ Yes | `trtllm_` prefix at `/prometheus/metrics` |
 | **Triton** | ✅ Full | ✅ Yes | `nv_inference_` / `nv_trt_llm_` on port 8002 |
 | **llama.cpp** | ✅ Full | ✅ Yes | `llamacpp:` prefix, requires `--metrics` flag |
+| **LiteLLM** | ✅ Full | ✅ Yes | `litellm_` prefix, proxy-level metrics |
 
 ## Keyboard Shortcuts
 

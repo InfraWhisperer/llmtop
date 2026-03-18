@@ -104,6 +104,14 @@ llamacpp:requests_processing 3
 	}
 }
 
+func TestDetectBackend_LiteLLM(t *testing.T) {
+	body := `litellm_requests_metric{model="gpt-4"} 500`
+	got := detectBackend(body)
+	if got != metrics.BackendLiteLLM {
+		t.Errorf("expected BackendLiteLLM, got %s", got)
+	}
+}
+
 func TestDetectBackend_Empty(t *testing.T) {
 	got := detectBackend("")
 	if got != metrics.BackendUnknown {

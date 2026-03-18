@@ -236,6 +236,17 @@ Same metrics as vLLM but without the `vllm:` prefix, served at `/v1/metrics`.
 - No TTFT/ITL histograms
 - Default port: 8080, metrics path: `/metrics` (requires `--metrics` flag)
 
+### LiteLLM
+- `litellm_in_flight_requests` — in-flight request count (gauge)
+- `litellm_llm_api_time_to_first_token_metric` — TTFT histogram (seconds)
+- `litellm_llm_api_latency_metric` — LLM API latency histogram (seconds, used as ITL proxy)
+- `litellm_input_tokens_metric` — input token counter (rate for prompt tok/s)
+- `litellm_output_tokens_metric` — output token counter (rate for gen tok/s)
+- Labels: `model`, `team`, `hashed_api_key`, etc.
+- No KV cache metrics (LiteLLM is a proxy, not an inference engine)
+- Default port: 4000, metrics path: `/metrics`
+- Requires `"prometheus"` in callbacks config
+
 ### DCGM (GPU view)
 - `DCGM_FI_DEV_GPU_UTIL` — GPU compute utilization (%)
 - `DCGM_FI_DEV_FB_USED` / `DCGM_FI_DEV_FB_FREE` — VRAM usage (MiB)

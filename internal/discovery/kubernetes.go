@@ -75,6 +75,7 @@ var knownImagePatterns = []struct {
 	{"llama-server", metrics.BackendLlamaCpp},
 	{"llama.cpp", metrics.BackendLlamaCpp},
 	{"llama-cpp", metrics.BackendLlamaCpp},
+	{"litellm", metrics.BackendLiteLLM},
 }
 
 // defaultPorts maps backends to their well-known metrics ports.
@@ -87,6 +88,7 @@ var defaultPorts = map[metrics.Backend]int{
 	metrics.BackendTRTLLM:  8000,
 	metrics.BackendTriton:   8002,
 	metrics.BackendLlamaCpp: 8080,
+	metrics.BackendLiteLLM:  4000,
 }
 
 // NewKubernetesDiscoverer creates a discoverer from a kubeconfig path.

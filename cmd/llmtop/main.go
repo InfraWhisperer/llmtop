@@ -266,6 +266,8 @@ func parseBackend(s string) metrics.Backend {
 		return metrics.BackendTriton
 	case "llamacpp", "llama.cpp", "llama-cpp":
 		return metrics.BackendLlamaCpp
+	case "litellm":
+		return metrics.BackendLiteLLM
 	default:
 		return metrics.BackendUnknown
 	}

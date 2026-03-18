@@ -150,6 +150,9 @@ func detectBackend(body string) metrics.Backend {
 		if strings.HasPrefix(line, "llamacpp:") {
 			return metrics.BackendLlamaCpp
 		}
+		if strings.HasPrefix(line, "litellm_") {
+			return metrics.BackendLiteLLM
+		}
 		// Accumulate NIM signals; all three must be present to avoid false positives.
 		if strings.HasPrefix(line, "num_requests_running") {
 			hasRunning = true

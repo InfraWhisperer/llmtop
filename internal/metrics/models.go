@@ -15,6 +15,7 @@ const (
 	BackendTRTLLM  Backend = "TRT-LLM"
 	BackendTriton   Backend = "Triton"
 	BackendLlamaCpp Backend = "llama.cpp"
+	BackendLiteLLM  Backend = "LiteLLM"
 	BackendUnknown  Backend = "Unknown"
 )
 
