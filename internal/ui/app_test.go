@@ -280,6 +280,7 @@ func TestFilterCycling(t *testing.T) {
 		metrics.BackendSGLang,
 		metrics.BackendLMCache,
 		metrics.BackendNIM,
+		metrics.BackendTGI,
 		metrics.BackendUnknown, // wraps back to "all"
 	}
 

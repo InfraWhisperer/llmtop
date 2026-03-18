@@ -66,6 +66,8 @@ var knownImagePatterns = []struct {
 	{"sglang", metrics.BackendSGLang},
 	{"lmcache", metrics.BackendLMCache},
 	{"nim", metrics.BackendNIM},
+	{"text-generation-inference", metrics.BackendTGI},
+	{"tgi", metrics.BackendTGI},
 }
 
 // defaultPorts maps backends to their well-known metrics ports.
@@ -74,6 +76,7 @@ var defaultPorts = map[metrics.Backend]int{
 	metrics.BackendSGLang:  30000,
 	metrics.BackendNIM:     8000,
 	metrics.BackendLMCache: 8080,
+	metrics.BackendTGI:     3000,
 }
 
 // NewKubernetesDiscoverer creates a discoverer from a kubeconfig path.

@@ -102,6 +102,7 @@ var filterCycle = []metrics.Backend{
 	metrics.BackendSGLang,
 	metrics.BackendLMCache,
 	metrics.BackendNIM,
+	metrics.BackendTGI,
 }
 
 var sortCycle = []SortColumn{

@@ -145,6 +145,10 @@ var (
 				Foreground(colorGreen).
 				Bold(true)
 
+	StyleBadgeTGI = lipgloss.NewStyle().
+			Foreground(colorYellow).
+			Bold(true)
+
 	StyleBadgeUnknown = lipgloss.NewStyle().
 				Foreground(colorGray)
 

@@ -192,6 +192,17 @@ Press `g` to toggle the GPU view showing per-GPU utilization, VRAM usage, temper
 ### NIM
 Same metrics as vLLM but without the `vllm:` prefix, served at `/v1/metrics`.
 
+### TGI (Hugging Face Text Generation Inference)
+- `tgi_queue_size` — queue depth (gauge)
+- `tgi_batch_current_size` — running requests / batch size (gauge)
+- `tgi_request_inference_duration` — inference latency histogram, used as TTFT proxy (seconds)
+- `tgi_request_mean_time_per_token_duration` — ITL histogram (seconds)
+- `tgi_request_generated_tokens` — generation throughput (histogram _sum for rate)
+- `tgi_request_input_length` — prompt throughput (histogram _sum for rate)
+- No KV cache metrics — TGI does not expose GPU memory stats via Prometheus
+- No model_name label — model info available via `/info` endpoint (JSON)
+- Default port: 3000, metrics path: `/metrics`
+
 ### DCGM (GPU view)
 - `DCGM_FI_DEV_GPU_UTIL` — GPU compute utilization (%)
 - `DCGM_FI_DEV_FB_USED` / `DCGM_FI_DEV_FB_FREE` — VRAM usage (MiB)

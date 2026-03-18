@@ -59,6 +59,17 @@ func TestDetectBackend_Unknown(t *testing.T) {
 	}
 }
 
+func TestDetectBackend_TGI(t *testing.T) {
+	body := `tgi_queue_size 3
+tgi_batch_current_size 5
+tgi_request_count 150
+`
+	got := detectBackend(body)
+	if got != metrics.BackendTGI {
+		t.Errorf("expected BackendTGI, got %s", got)
+	}
+}
+
 func TestDetectBackend_Empty(t *testing.T) {
 	got := detectBackend("")
 	if got != metrics.BackendUnknown {

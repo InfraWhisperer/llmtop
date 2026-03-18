@@ -11,6 +11,7 @@ const (
 	BackendSGLang  Backend = "SGLang"
 	BackendLMCache Backend = "LMCache"
 	BackendNIM     Backend = "NIM"
+	BackendTGI     Backend = "TGI"
 	BackendUnknown Backend = "Unknown"
 )
 

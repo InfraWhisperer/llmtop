@@ -145,6 +145,17 @@ func (pm *ParsedMetrics) GetHistogramQuantileAny(name string, quantile float64) 
 	return 0, false
 }
 
+// GetHistogramSumAny returns the _sum value for a histogram metric (any labels).
+// Useful for computing rates from cumulative counters like token counts.
+func (pm *ParsedMetrics) GetHistogramSumAny(name string) (float64, bool) {
+	for _, h := range pm.Histograms {
+		if h.Name == name {
+			return h.Sum, true
+		}
+	}
+	return 0, false
+}
+
 // estimateQuantile estimates a quantile value from histogram buckets using linear interpolation.
 func estimateQuantile(buckets []HistogramBucket, totalCount float64, quantile float64) float64 {
 	if len(buckets) == 0 || totalCount == 0 {

@@ -249,6 +249,8 @@ func backendStyle(b metrics.Backend) lipgloss.Style {
 		return StyleBadgeLMCache
 	case metrics.BackendNIM:
 		return StyleBadgeNIM
+	case metrics.BackendTGI:
+		return StyleBadgeTGI
 	default:
 		return StyleBadgeUnknown
 	}

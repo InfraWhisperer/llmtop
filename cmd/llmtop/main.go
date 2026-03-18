@@ -258,6 +258,8 @@ func parseBackend(s string) metrics.Backend {
 		return metrics.BackendLMCache
 	case "nim":
 		return metrics.BackendNIM
+	case "tgi":
+		return metrics.BackendTGI
 	default:
 		return metrics.BackendUnknown
 	}
