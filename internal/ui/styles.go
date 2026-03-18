@@ -149,6 +149,10 @@ var (
 			Foreground(colorYellow).
 			Bold(true)
 
+	StyleBadgeTRTLLM = lipgloss.NewStyle().
+				Foreground(colorGreen).
+				Bold(true)
+
 	StyleBadgeUnknown = lipgloss.NewStyle().
 				Foreground(colorGray)
 

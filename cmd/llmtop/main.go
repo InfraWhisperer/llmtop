@@ -260,6 +260,8 @@ func parseBackend(s string) metrics.Backend {
 		return metrics.BackendNIM
 	case "tgi":
 		return metrics.BackendTGI
+	case "trtllm", "tensorrt-llm":
+		return metrics.BackendTRTLLM
 	default:
 		return metrics.BackendUnknown
 	}

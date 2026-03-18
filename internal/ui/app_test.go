@@ -281,6 +281,7 @@ func TestFilterCycling(t *testing.T) {
 		metrics.BackendLMCache,
 		metrics.BackendNIM,
 		metrics.BackendTGI,
+		metrics.BackendTRTLLM,
 		metrics.BackendUnknown, // wraps back to "all"
 	}
 

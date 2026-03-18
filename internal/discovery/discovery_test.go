@@ -70,6 +70,14 @@ tgi_request_count 150
 	}
 }
 
+func TestDetectBackend_TRTLLM(t *testing.T) {
+	body := `trtllm_kv_cache_utilization{model_name="llama-8b",engine_type="trtllm"} 0.62`
+	got := detectBackend(body)
+	if got != metrics.BackendTRTLLM {
+		t.Errorf("expected BackendTRTLLM, got %s", got)
+	}
+}
+
 func TestDetectBackend_Empty(t *testing.T) {
 	got := detectBackend("")
 	if got != metrics.BackendUnknown {

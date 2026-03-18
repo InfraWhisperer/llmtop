@@ -103,6 +103,7 @@ var filterCycle = []metrics.Backend{
 	metrics.BackendLMCache,
 	metrics.BackendNIM,
 	metrics.BackendTGI,
+	metrics.BackendTRTLLM,
 }
 
 var sortCycle = []SortColumn{

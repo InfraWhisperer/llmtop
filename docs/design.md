@@ -203,6 +203,17 @@ Same metrics as vLLM but without the `vllm:` prefix, served at `/v1/metrics`.
 - No model_name label — model info available via `/info` endpoint (JSON)
 - Default port: 3000, metrics path: `/metrics`
 
+### TensorRT-LLM (standalone trtllm-serve)
+- `trtllm_kv_cache_utilization` — KV cache usage gauge (0.0-1.0)
+- `trtllm_kv_cache_hit_rate` — KV cache hit rate gauge (0.0-1.0)
+- `trtllm_time_to_first_token_seconds` — TTFT histogram (seconds)
+- `trtllm_time_per_output_token_seconds` — ITL/TPOT histogram (seconds)
+- `trtllm_e2e_request_latency_seconds` — end-to-end request latency histogram
+- `trtllm_request_success_total` — successful request counter
+- Labels: `model_name`, `engine_type`
+- Default port: 8000, metrics path: `/prometheus/metrics`
+- Note: when TRT-LLM runs behind Triton, metrics use `nv_trt_llm_` prefix (handled by Triton parser)
+
 ### DCGM (GPU view)
 - `DCGM_FI_DEV_GPU_UTIL` — GPU compute utilization (%)
 - `DCGM_FI_DEV_FB_USED` / `DCGM_FI_DEV_FB_FREE` — VRAM usage (MiB)

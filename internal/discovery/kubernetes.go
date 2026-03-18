@@ -68,6 +68,8 @@ var knownImagePatterns = []struct {
 	{"nim", metrics.BackendNIM},
 	{"text-generation-inference", metrics.BackendTGI},
 	{"tgi", metrics.BackendTGI},
+	{"tensorrt-llm", metrics.BackendTRTLLM},
+	{"trtllm", metrics.BackendTRTLLM},
 }
 
 // defaultPorts maps backends to their well-known metrics ports.
@@ -77,6 +79,7 @@ var defaultPorts = map[metrics.Backend]int{
 	metrics.BackendNIM:     8000,
 	metrics.BackendLMCache: 8080,
 	metrics.BackendTGI:     3000,
+	metrics.BackendTRTLLM:  8000,
 }
 
 // NewKubernetesDiscoverer creates a discoverer from a kubeconfig path.
@@ -408,6 +411,9 @@ func resolveMetricsPath(pod *corev1.Pod, backend metrics.Backend) string {
 	}
 	if backend == metrics.BackendNIM {
 		return "/v1/metrics"
+	}
+	if backend == metrics.BackendTRTLLM {
+		return "/prometheus/metrics"
 	}
 	return "/metrics"
 }
