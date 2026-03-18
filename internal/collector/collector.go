@@ -264,6 +264,12 @@ func (c *Collector) pollWorker(ctx context.Context, endpoint string) {
 		return
 	}
 
+	// Ollama returns JSON from /api/ps, not Prometheus text.
+	// Synthesize pseudo-Prometheus format before parsing.
+	if current.Backend == metrics.BackendOllama {
+		body = SynthesizeOllamaMetrics(body)
+	}
+
 	pm := metrics.ParseText(body)
 	updated, newCounters := parseWorkerMetrics(current, prev, prevCounters, pm)
 

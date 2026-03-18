@@ -14,7 +14,7 @@ import (
 )
 
 // DefaultPorts are the well-known ports to probe for local LLM workers.
-var DefaultPorts = []int{8000, 8001, 8002, 8003, 8080, 8081, 8090}
+var DefaultPorts = []int{8000, 8001, 8002, 8003, 8080, 8081, 8090, 11434}
 
 // DiscoverResult holds the result of discovering a single endpoint.
 type DiscoverResult struct {
@@ -73,6 +73,15 @@ func DiscoverPorts(ctx context.Context, host string, ports []int) []Target {
 					return
 				}
 			}
+			// Phase 3: /api/ps — Ollama JSON endpoint (no Prometheus)
+			body, err = probeEndpoint(ctx, client, endpoint+"/api/ps")
+			if err == nil && isOllamaResponse(body) {
+				results <- Target{
+					Endpoint:    endpoint,
+					Backend:     metrics.BackendOllama,
+					MetricsPath: "/api/ps",
+				}
+			}
 		}(port)
 	}
 
@@ -108,6 +117,11 @@ func probeEndpoint(ctx context.Context, client *http.Client, url string) (string
 		return "", err
 	}
 	return string(body), nil
+}
+
+// isOllamaResponse checks if a response body looks like an Ollama /api/ps JSON response.
+func isOllamaResponse(body string) bool {
+	return strings.Contains(body, "\"models\"") && strings.Contains(body, "\"size_vram\"")
 }
 
 // detectBackend identifies the backend type from raw Prometheus metric text.

@@ -76,6 +76,7 @@ var knownImagePatterns = []struct {
 	{"llama.cpp", metrics.BackendLlamaCpp},
 	{"llama-cpp", metrics.BackendLlamaCpp},
 	{"litellm", metrics.BackendLiteLLM},
+	{"ollama", metrics.BackendOllama},
 }
 
 // defaultPorts maps backends to their well-known metrics ports.
@@ -89,6 +90,7 @@ var defaultPorts = map[metrics.Backend]int{
 	metrics.BackendTriton:   8002,
 	metrics.BackendLlamaCpp: 8080,
 	metrics.BackendLiteLLM:  4000,
+	metrics.BackendOllama:   11434,
 }
 
 // NewKubernetesDiscoverer creates a discoverer from a kubeconfig path.
@@ -423,6 +425,9 @@ func resolveMetricsPath(pod *corev1.Pod, backend metrics.Backend) string {
 	}
 	if backend == metrics.BackendTRTLLM {
 		return "/prometheus/metrics"
+	}
+	if backend == metrics.BackendOllama {
+		return "/api/ps"
 	}
 	return "/metrics"
 }

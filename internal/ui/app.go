@@ -107,6 +107,7 @@ var filterCycle = []metrics.Backend{
 	metrics.BackendTriton,
 	metrics.BackendLlamaCpp,
 	metrics.BackendLiteLLM,
+	metrics.BackendOllama,
 }
 
 var sortCycle = []SortColumn{

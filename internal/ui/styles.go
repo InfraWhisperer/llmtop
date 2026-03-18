@@ -165,6 +165,10 @@ var (
 				Foreground(colorMagenta).
 				Bold(true)
 
+	StyleBadgeOllama = lipgloss.NewStyle().
+				Foreground(colorWhite).
+				Bold(true)
+
 	StyleBadgeUnknown = lipgloss.NewStyle().
 				Foreground(colorGray)
 

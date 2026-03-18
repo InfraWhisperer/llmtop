@@ -112,6 +112,20 @@ func TestDetectBackend_LiteLLM(t *testing.T) {
 	}
 }
 
+func TestIsOllamaResponse(t *testing.T) {
+	body := `{"models":[{"name":"mistral:latest","size_vram":5137025024}]}`
+	if !isOllamaResponse(body) {
+		t.Error("expected isOllamaResponse to return true for valid Ollama response")
+	}
+}
+
+func TestIsOllamaResponse_NotOllama(t *testing.T) {
+	body := `{"status":"ok"}`
+	if isOllamaResponse(body) {
+		t.Error("expected isOllamaResponse to return false for non-Ollama JSON")
+	}
+}
+
 func TestDetectBackend_Empty(t *testing.T) {
 	got := detectBackend("")
 	if got != metrics.BackendUnknown {

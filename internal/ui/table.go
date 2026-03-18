@@ -259,6 +259,8 @@ func backendStyle(b metrics.Backend) lipgloss.Style {
 		return StyleBadgeLlamaCpp
 	case metrics.BackendLiteLLM:
 		return StyleBadgeLiteLLM
+	case metrics.BackendOllama:
+		return StyleBadgeOllama
 	default:
 		return StyleBadgeUnknown
 	}

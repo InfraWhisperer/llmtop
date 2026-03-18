@@ -81,6 +81,7 @@ llmtop --once --output json
 | **Triton** | ✅ Full | ✅ Yes | `nv_inference_` / `nv_trt_llm_` on port 8002 |
 | **llama.cpp** | ✅ Full | ✅ Yes | `llamacpp:` prefix, requires `--metrics` flag |
 | **LiteLLM** | ✅ Full | ✅ Yes | `litellm_` prefix, proxy-level metrics |
+| **Ollama** | ⚡ Basic | ✅ Yes | JSON `/api/ps` — model name + online status |
 
 ## Keyboard Shortcuts
 

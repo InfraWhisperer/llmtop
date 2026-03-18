@@ -285,6 +285,7 @@ func TestFilterCycling(t *testing.T) {
 		metrics.BackendTriton,
 		metrics.BackendLlamaCpp,
 		metrics.BackendLiteLLM,
+		metrics.BackendOllama,
 		metrics.BackendUnknown, // wraps back to "all"
 	}
 

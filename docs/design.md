@@ -247,6 +247,14 @@ Same metrics as vLLM but without the `vllm:` prefix, served at `/v1/metrics`.
 - Default port: 4000, metrics path: `/metrics`
 - Requires `"prometheus"` in callbacks config
 
+### Ollama
+- No native Prometheus endpoint — uses `/api/ps` JSON endpoint
+- `ollama_model_loaded` — synthesized gauge indicating loaded models (from JSON)
+- Available data: model name, parameter size, quantization level, VRAM usage
+- No request metrics, no latency, no throughput counters
+- Workers show as online with model name; metric columns show "-"
+- Default port: 11434, metrics path: `/api/ps` (JSON, auto-converted)
+
 ### DCGM (GPU view)
 - `DCGM_FI_DEV_GPU_UTIL` — GPU compute utilization (%)
 - `DCGM_FI_DEV_FB_USED` / `DCGM_FI_DEV_FB_FREE` — VRAM usage (MiB)
