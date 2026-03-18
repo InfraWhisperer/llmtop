@@ -282,6 +282,7 @@ func TestFilterCycling(t *testing.T) {
 		metrics.BackendNIM,
 		metrics.BackendTGI,
 		metrics.BackendTRTLLM,
+		metrics.BackendTriton,
 		metrics.BackendUnknown, // wraps back to "all"
 	}
 

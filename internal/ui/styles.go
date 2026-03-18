@@ -153,6 +153,10 @@ var (
 				Foreground(colorGreen).
 				Bold(true)
 
+	StyleBadgeTriton = lipgloss.NewStyle().
+				Foreground(colorBlue).
+				Bold(true)
+
 	StyleBadgeUnknown = lipgloss.NewStyle().
 				Foreground(colorGray)
 

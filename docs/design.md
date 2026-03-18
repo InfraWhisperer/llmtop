@@ -214,6 +214,17 @@ Same metrics as vLLM but without the `vllm:` prefix, served at `/v1/metrics`.
 - Default port: 8000, metrics path: `/prometheus/metrics`
 - Note: when TRT-LLM runs behind Triton, metrics use `nv_trt_llm_` prefix (handled by Triton parser)
 
+### Triton Inference Server
+- `nv_inference_pending_request_count` — queue depth gauge (per model)
+- `nv_inference_request_success` — successful request counter (per model)
+- `nv_inference_count` — total inferences counter (batch-expanded)
+- `nv_inference_exec_count` — batch execution counter
+- `nv_inference_first_response_histogram_ms` — TTFT histogram (ms, disabled by default)
+- `nv_trt_llm_request_metrics` — TRT-LLM request states (context/scheduled/waiting/active)
+- `nv_trt_llm_kv_cache_block_metrics` — TRT-LLM KV cache (fraction/used/free/max)
+- Labels: `model`, `version` (per-model); `gpu_uuid` (GPU metrics)
+- Default port: 8002, metrics path: `/metrics`
+
 ### DCGM (GPU view)
 - `DCGM_FI_DEV_GPU_UTIL` — GPU compute utilization (%)
 - `DCGM_FI_DEV_FB_USED` / `DCGM_FI_DEV_FB_FREE` — VRAM usage (MiB)

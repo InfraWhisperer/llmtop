@@ -78,6 +78,22 @@ func TestDetectBackend_TRTLLM(t *testing.T) {
 	}
 }
 
+func TestDetectBackend_Triton(t *testing.T) {
+	body := `nv_inference_request_success{model="llama-7b",version="1"} 500`
+	got := detectBackend(body)
+	if got != metrics.BackendTriton {
+		t.Errorf("expected BackendTriton, got %s", got)
+	}
+}
+
+func TestDetectBackend_TritonTRTLLM(t *testing.T) {
+	body := `nv_trt_llm_request_metrics{model="tensorrt_llm",version="1",request_type="context"} 3`
+	got := detectBackend(body)
+	if got != metrics.BackendTriton {
+		t.Errorf("expected BackendTriton, got %s", got)
+	}
+}
+
 func TestDetectBackend_Empty(t *testing.T) {
 	got := detectBackend("")
 	if got != metrics.BackendUnknown {

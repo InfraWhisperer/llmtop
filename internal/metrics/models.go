@@ -13,6 +13,7 @@ const (
 	BackendNIM     Backend = "NIM"
 	BackendTGI     Backend = "TGI"
 	BackendTRTLLM  Backend = "TRT-LLM"
+	BackendTriton  Backend = "Triton"
 	BackendUnknown Backend = "Unknown"
 )
 

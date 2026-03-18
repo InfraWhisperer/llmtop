@@ -104,6 +104,7 @@ var filterCycle = []metrics.Backend{
 	metrics.BackendNIM,
 	metrics.BackendTGI,
 	metrics.BackendTRTLLM,
+	metrics.BackendTriton,
 }
 
 var sortCycle = []SortColumn{

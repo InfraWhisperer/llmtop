@@ -117,7 +117,7 @@ func probeEndpoint(ctx context.Context, client *http.Client, url string) (string
 //
 // IMPORTANT: When adding a new backend, update BOTH this heuristic AND
 // the corresponding BackendParser.Detect() in internal/collector/.
-// Registered backends: vLLM (vllm:), SGLang (sglang:), LMCache (lmcache_), NIM (conjunction), TGI (tgi_), TRT-LLM (trtllm_).
+// Registered backends: vLLM (vllm:), SGLang (sglang:), LMCache (lmcache_), NIM (conjunction), TGI (tgi_), TRT-LLM (trtllm_), Triton (nv_inference_/nv_trt_llm_).
 func detectBackend(body string) metrics.Backend {
 	hasRunning := false
 	hasCachePerc := false
@@ -143,6 +143,9 @@ func detectBackend(body string) metrics.Backend {
 		}
 		if strings.HasPrefix(line, "trtllm_") {
 			return metrics.BackendTRTLLM
+		}
+		if strings.HasPrefix(line, "nv_trt_llm_") || strings.HasPrefix(line, "nv_inference_") {
+			return metrics.BackendTriton
 		}
 		// Accumulate NIM signals; all three must be present to avoid false positives.
 		if strings.HasPrefix(line, "num_requests_running") {
