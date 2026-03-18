@@ -13,8 +13,9 @@ const (
 	BackendNIM     Backend = "NIM"
 	BackendTGI     Backend = "TGI"
 	BackendTRTLLM  Backend = "TRT-LLM"
-	BackendTriton  Backend = "Triton"
-	BackendUnknown Backend = "Unknown"
+	BackendTriton   Backend = "Triton"
+	BackendLlamaCpp Backend = "llama.cpp"
+	BackendUnknown  Backend = "Unknown"
 )
 
 // WorkerMetrics holds all collected metrics for a single inference worker endpoint.

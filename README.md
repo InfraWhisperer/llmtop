@@ -76,6 +76,10 @@ llmtop --once --output json
 | **LMCache** | ✅ Cache | ✅ Yes | `lmcache_` metric prefix |
 | **NIM** | ✅ Full | ✅ Yes | Unprefixed vLLM metrics at `/v1/metrics` |
 | **Dynamo** | ✅ Full | ✅ Yes | Auto-filters frontends, labels decode/prefill workers |
+| **TGI** | ✅ Full | ✅ Yes | `tgi_` metric prefix, no KV cache metrics |
+| **TensorRT-LLM** | ✅ Full | ✅ Yes | `trtllm_` prefix at `/prometheus/metrics` |
+| **Triton** | ✅ Full | ✅ Yes | `nv_inference_` / `nv_trt_llm_` on port 8002 |
+| **llama.cpp** | ✅ Full | ✅ Yes | `llamacpp:` prefix, requires `--metrics` flag |
 
 ## Keyboard Shortcuts
 

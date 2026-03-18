@@ -157,6 +157,10 @@ var (
 				Foreground(colorBlue).
 				Bold(true)
 
+	StyleBadgeLlamaCpp = lipgloss.NewStyle().
+				Foreground(colorGray).
+				Bold(true)
+
 	StyleBadgeUnknown = lipgloss.NewStyle().
 				Foreground(colorGray)
 

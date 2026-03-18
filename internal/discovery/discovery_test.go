@@ -94,6 +94,16 @@ func TestDetectBackend_TritonTRTLLM(t *testing.T) {
 	}
 }
 
+func TestDetectBackend_LlamaCpp(t *testing.T) {
+	body := `llamacpp:kv_cache_usage_ratio 0.42
+llamacpp:requests_processing 3
+`
+	got := detectBackend(body)
+	if got != metrics.BackendLlamaCpp {
+		t.Errorf("expected BackendLlamaCpp, got %s", got)
+	}
+}
+
 func TestDetectBackend_Empty(t *testing.T) {
 	got := detectBackend("")
 	if got != metrics.BackendUnknown {

@@ -225,6 +225,17 @@ Same metrics as vLLM but without the `vllm:` prefix, served at `/v1/metrics`.
 - Labels: `model`, `version` (per-model); `gpu_uuid` (GPU metrics)
 - Default port: 8002, metrics path: `/metrics`
 
+### llama.cpp / llama-server
+- `llamacpp:kv_cache_usage_ratio` — KV cache utilization gauge (0.0-1.0)
+- `llamacpp:requests_processing` — active request slots (gauge)
+- `llamacpp:requests_deferred` — deferred/queued requests (gauge)
+- `llamacpp:prompt_tokens_seconds` — prompt throughput gauge (tok/s, computed by server)
+- `llamacpp:predicted_tokens_seconds` — generation throughput gauge (tok/s, computed by server)
+- `llamacpp:kv_cache_tokens` — current KV cache token count (gauge)
+- No model_name label — metrics are global aggregates
+- No TTFT/ITL histograms
+- Default port: 8080, metrics path: `/metrics` (requires `--metrics` flag)
+
 ### DCGM (GPU view)
 - `DCGM_FI_DEV_GPU_UTIL` — GPU compute utilization (%)
 - `DCGM_FI_DEV_FB_USED` / `DCGM_FI_DEV_FB_FREE` — VRAM usage (MiB)
