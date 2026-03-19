@@ -235,7 +235,7 @@ func run(endpoints []string, configFile string, intervalSec int, once bool, outp
 		workerConfigs = append(workerConfigs, app.TargetsToWorkerConfigs(discovered)...)
 	}
 
-	return app.New(app.Options{
+	opts := app.Options{
 		WorkerConfigs:  workerConfigs,
 		Interval:       interval,
 		DCGMEndpoint:   dcgmEndpoint,
@@ -245,7 +245,11 @@ func run(endpoints []string, configFile string, intervalSec int, once bool, outp
 		Once:           once,
 		OutputFormat:   outputFmt,
 		Version:        version,
-	}).Run(ctx)
+	}
+	if cfg != nil {
+		opts.Topology = cfg.Topology
+	}
+	return app.New(opts).Run(ctx)
 }
 
 func parseBackend(s string) metrics.Backend {

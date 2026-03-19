@@ -25,12 +25,20 @@ type KubernetesConfig struct {
 	RequestTimeout string `yaml:"requestTimeout"`  // default "2s"
 }
 
+// TopologyEntry defines a role in a disaggregated prefill/decode pipeline.
+type TopologyEntry struct {
+	Role      string   `yaml:"role"`      // "prefill" or "decode"
+	Endpoints []string `yaml:"endpoints"` // worker endpoint URLs
+	Feeds     []string `yaml:"feeds"`     // endpoints this role feeds into (prefill → decode)
+}
+
 // Config represents the top-level llmtop configuration.
 type Config struct {
 	Interval     int              `yaml:"interval"`      // refresh interval in seconds (default 2)
 	DCGMEndpoint string           `yaml:"dcgm_endpoint"` // optional DCGM exporter URL
 	Kubernetes   KubernetesConfig `yaml:"kubernetes"`
 	Endpoints    []EndpointConfig `yaml:"endpoints"`
+	Topology     []TopologyEntry  `yaml:"topology"`      // optional disaggregated pipeline topology
 }
 
 // DefaultConfig returns a Config with default values.
