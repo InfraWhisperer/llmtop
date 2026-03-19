@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/InfraWhisperer/llmtop/internal/collector"
 	"github.com/InfraWhisperer/llmtop/internal/metrics"
+	"github.com/InfraWhisperer/llmtop/pkg/plugins"
 )
 
 // View represents the current UI view mode.
@@ -61,6 +62,9 @@ const (
 
 var gpuSortCycle = []GPUSortColumn{GPUSortNone, GPUSortUtil, GPUSortVRAM, GPUSortTemp, GPUSortPower}
 
+// ViewConfirm is the confirmation dialog view for dangerous plugin commands.
+const ViewConfirm View = 10
+
 // Model is the Bubbletea application model.
 type Model struct {
 	collector     collector.MetricsSource
@@ -94,6 +98,15 @@ type Model struct {
 	modelSelectedIdx int
 	modelSortCol     ModelSortColumn
 	modelFilter      string // when set, ViewMain shows only workers for this model
+
+	// Plugin system
+	plugins        []plugins.Plugin
+	readonly       bool
+	bgPluginStatus string           // status text for running background plugin
+	confirmPlugin  *plugins.Plugin  // plugin pending confirmation
+	confirmCmd     string           // resolved command string for confirmation display
+	confirmEnv     map[string]string // resolved env for confirmed execution
+	prevView       View             // view to return to after confirmation
 }
 
 var filterCycle = []metrics.Backend{
@@ -120,13 +133,15 @@ var sortCycle = []SortColumn{
 }
 
 // NewModel creates a new application model.
-func NewModel(c collector.MetricsSource, dc collector.GPUSource, version string, intervalSec int, k8sContext string) Model {
+func NewModel(c collector.MetricsSource, dc collector.GPUSource, version string, intervalSec int, k8sContext string, pluginList []plugins.Plugin, readonly bool) Model {
 	return Model{
 		collector:     c,
 		dcgmCollector: dc,
 		version:       version,
 		intervalSec:   intervalSec,
 		k8sContext:    k8sContext,
+		plugins:       pluginList,
+		readonly:      readonly,
 	}
 }
 
@@ -201,6 +216,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case exportDoneMsg:
 		return m, nil
 
+	case pluginDoneMsg:
+		m.bgPluginStatus = ""
+		return m, nil
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -251,6 +270,32 @@ func exportJSONCmd(workers []*metrics.WorkerMetrics, summary metrics.FleetSummar
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.currentView {
+	case ViewConfirm:
+		switch msg.String() {
+		case "y":
+			if m.confirmPlugin != nil {
+				p := *m.confirmPlugin
+				args := plugins.InterpolateArgs(p.Args, m.confirmEnv)
+				m.confirmPlugin = nil
+				m.confirmCmd = ""
+				m.confirmEnv = nil
+				m.currentView = m.prevView
+				if p.Background {
+					m.bgPluginStatus = "Running: " + p.Name + "..."
+					return m, runPluginBackground(p.Name, p.Command, args)
+				}
+				return m, runPluginForeground(p.Name, p.Command, args)
+			}
+			m.currentView = m.prevView
+			return m, nil
+		default:
+			m.confirmPlugin = nil
+			m.confirmCmd = ""
+			m.confirmEnv = nil
+			m.currentView = m.prevView
+			return m, nil
+		}
+
 	case ViewDetail, ViewHelp:
 		switch msg.String() {
 		case "q", "ctrl+c":
@@ -338,6 +383,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "?":
 		m.currentView = ViewHelp
+
+	default:
+		return m.tryPluginKey(msg.String(), "worker")
 	}
 
 	return m, nil
@@ -391,6 +439,9 @@ func (m Model) handleModelGroupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "?":
 		m.currentView = ViewHelp
+
+	default:
+		return m.tryPluginKey(msg.String(), "model")
 	}
 
 	return m, nil
@@ -463,6 +514,9 @@ func (m Model) handleGPUKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "?":
 		m.currentView = ViewHelp
+
+	default:
+		return m.tryPluginKey(msg.String(), "gpu")
 	}
 
 	return m, nil
@@ -528,6 +582,8 @@ func (m Model) View() string {
 		return m.renderGPUDetail()
 	case ViewModelGroup:
 		return m.renderModelMain()
+	case ViewConfirm:
+		return m.renderConfirm()
 	}
 
 	return m.renderMain()
@@ -564,6 +620,11 @@ func (m Model) renderMain() string {
 	if m.sortCol != SortNone {
 		sortLine := StyleHeaderStat.Render("  Sort: ") + StyleSortIndicator.Render(SortColumnName(m.sortCol)+" ↓")
 		sb.WriteString(sortLine + "\n")
+	}
+
+	// Background plugin status
+	if m.bgPluginStatus != "" {
+		sb.WriteString(StyleHeaderStat.Render("  ") + StyleMetricWarn.Render(m.bgPluginStatus) + "\n")
 	}
 
 	sb.WriteString("\n")
@@ -782,6 +843,27 @@ func (m Model) renderHelp() string {
 			StyleHelpDesc.Render(s.desc) + "\n")
 	}
 
+	// Show plugins for the current view scope
+	scope := viewScope(m.currentView)
+	if scope == "" {
+		scope = "worker" // help is reachable from main view
+	}
+	scopePlugins := plugins.ForScope(m.plugins, scope)
+	if len(scopePlugins) > 0 {
+		sb.WriteString("\n" + StyleHelpTitle.Render("Plugins ("+scope+" scope)") + "\n\n")
+		for _, p := range scopePlugins {
+			desc := p.Description
+			if p.Dangerous {
+				desc += " ⚠"
+			}
+			if m.readonly && p.Dangerous {
+				desc += " (disabled: readonly)"
+			}
+			sb.WriteString("  " + StyleHelpKey.Render(fmt.Sprintf("%-22s", p.ShortCut)) +
+				StyleHelpDesc.Render(desc) + "\n")
+		}
+	}
+
 	sb.WriteString("\n" + StyleFooter.Render("Press any key to close"))
 
 	return lipgloss.PlaceHorizontal(m.width, lipgloss.Center,
@@ -789,6 +871,97 @@ func (m Model) renderHelp() string {
 			StyleHelpOverlay.Render(sb.String()),
 		),
 	)
+}
+
+// tryPluginKey checks if a key press matches a plugin shortcut for the given
+// scope and dispatches the plugin command. Returns the model unchanged if no
+// plugin matches.
+func (m Model) tryPluginKey(key string, scope string) (tea.Model, tea.Cmd) {
+	for i := range m.plugins {
+		p := &m.plugins[i]
+		if plugins.ShortcutKey(*p) != key {
+			continue
+		}
+		// Check scope match
+		matched := false
+		for _, s := range p.Scopes {
+			if s == scope {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+
+		// Dangerous plugins disabled in readonly mode
+		if p.Dangerous && m.readonly {
+			return m, nil
+		}
+
+		// Build environment from currently selected resource
+		env := m.pluginEnv(scope)
+
+		// Confirmation required — show dialog
+		if p.Confirm {
+			m.confirmPlugin = p
+			m.confirmCmd = resolvePluginCmd(*p, env)
+			m.confirmEnv = env
+			m.prevView = m.currentView
+			m.currentView = ViewConfirm
+			return m, nil
+		}
+
+		// Execute directly
+		args := plugins.InterpolateArgs(p.Args, env)
+		if p.Background {
+			m.bgPluginStatus = "Running: " + p.Name + "..."
+			return m, runPluginBackground(p.Name, p.Command, args)
+		}
+		return m, runPluginForeground(p.Name, p.Command, args)
+	}
+	return m, nil
+}
+
+func (m Model) renderConfirm() string {
+	var sb strings.Builder
+	sb.WriteString(StyleHelpTitle.Render("Confirm Plugin Execution") + "\n\n")
+
+	if m.confirmPlugin != nil {
+		sb.WriteString("  " + StyleDetailLabel.Render("Plugin:  ") + StyleDetailValue.Render(m.confirmPlugin.Name) + "\n")
+		sb.WriteString("  " + StyleDetailLabel.Render("Command: ") + StyleDetailValue.Render(m.confirmCmd) + "\n")
+		if m.confirmPlugin.Dangerous {
+			sb.WriteString("\n  " + StyleMetricBad.Render("⚠ This plugin is marked as dangerous") + "\n")
+		}
+	}
+
+	sb.WriteString("\n  Press " + StyleFooterKey.Render("y") + " to execute, any other key to cancel")
+
+	return lipgloss.PlaceHorizontal(m.width, lipgloss.Center,
+		lipgloss.PlaceVertical(m.height, lipgloss.Center,
+			StyleHelpOverlay.Render(sb.String()),
+		),
+	)
+}
+
+// pluginEnv returns the variable environment for the currently selected
+// resource in the given scope.
+func (m Model) pluginEnv(scope string) map[string]string {
+	switch scope {
+	case "worker":
+		if m.selectedIdx < len(m.workers) {
+			return workerEnv(m.workers[m.selectedIdx], m.k8sContext)
+		}
+	case "gpu":
+		if m.gpuSelectedIdx < len(m.gpus) {
+			return gpuEnv(m.gpus[m.gpuSelectedIdx], m.k8sContext)
+		}
+	case "model":
+		if m.modelSelectedIdx < len(m.modelGroups) {
+			return modelEnv(m.modelGroups[m.modelSelectedIdx], m.k8sContext)
+		}
+	}
+	return map[string]string{}
 }
 
 func renderDetailRow(label, value string) string {

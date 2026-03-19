@@ -1,0 +1,15 @@
+plugins:
+  gpu-processes:
+    shortCut: shift-p
+    description: Show GPU compute processes on node
+    scopes: [gpu]
+    command: kubectl
+    args: ["exec", "-it", "$POD_NAME", "-n", "$NAMESPACE", "--context", "$CONTEXT", "--", "nvidia-smi", "pmon", "-c", "1"]
+    background: false
+  gpu-topology:
+    shortCut: shift-o
+    description: Show GPU topology on node
+    scopes: [gpu]
+    command: kubectl
+    args: ["exec", "-it", "$POD_NAME", "-n", "$NAMESPACE", "--context", "$CONTEXT", "--", "nvidia-smi", "topo", "-m"]
+    background: false

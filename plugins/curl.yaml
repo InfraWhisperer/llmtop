@@ -1,0 +1,15 @@
+plugins:
+  test-prompt:
+    shortCut: shift-t
+    description: Send test prompt to worker
+    scopes: [worker]
+    command: curl
+    args: ["-s", "-X", "POST", "$ENDPOINT/v1/completions", "-H", "Content-Type: application/json", "-d", "{\"model\":\"$MODEL\",\"prompt\":\"Hello\",\"max_tokens\":10}"]
+    background: false
+  health-check:
+    shortCut: shift-h
+    description: Check worker health endpoint
+    scopes: [worker]
+    command: curl
+    args: ["-s", "-o", "/dev/null", "-w", "%{http_code} %{time_total}s", "$ENDPOINT/health"]
+    background: true
