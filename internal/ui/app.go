@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/InfraWhisperer/llmtop/internal/collector"
 	"github.com/InfraWhisperer/llmtop/internal/metrics"
+	"github.com/InfraWhisperer/llmtop/pkg/config"
 )
 
 // View represents the current UI view mode.
@@ -26,6 +27,7 @@ const (
 	ViewGPU
 	ViewGPUDetail
 	ViewModelGroup
+	ViewTopology
 )
 
 // tickMsg is sent on each refresh interval.
@@ -94,6 +96,11 @@ type Model struct {
 	modelSelectedIdx int
 	modelSortCol     ModelSortColumn
 	modelFilter      string // when set, ViewMain shows only workers for this model
+
+	// Topology view state
+	topoConfig      []config.TopologyEntry
+	topoGraph       TopologyGraph
+	topoSelectedIdx int
 }
 
 var filterCycle = []metrics.Backend{
@@ -120,13 +127,14 @@ var sortCycle = []SortColumn{
 }
 
 // NewModel creates a new application model.
-func NewModel(c collector.MetricsSource, dc collector.GPUSource, version string, intervalSec int, k8sContext string) Model {
+func NewModel(c collector.MetricsSource, dc collector.GPUSource, version string, intervalSec int, k8sContext string, topoConfig []config.TopologyEntry) Model {
 	return Model{
 		collector:     c,
 		dcgmCollector: dc,
 		version:       version,
 		intervalSec:   intervalSec,
 		k8sContext:    k8sContext,
+		topoConfig:    topoConfig,
 	}
 }
 
@@ -173,6 +181,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.gpus = msg.gpus
 		m.gpuSummary = msg.gpuSummary
 		m.modelGroups = metrics.GroupWorkersByModel(msg.workers)
+		m.topoGraph = BuildTopology(msg.workers, m.topoConfig)
 		m.lastRefresh = time.Now()
 		m.spinnerIdx = (m.spinnerIdx + 1) % 4
 		// Stable sort: always sort by name first, then apply user sort on top
@@ -274,6 +283,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case ViewModelGroup:
 		return m.handleModelGroupKey(msg)
+
+	case ViewTopology:
+		return m.handleTopologyKey(msg)
 	}
 
 	// Main view
@@ -335,6 +347,56 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.currentView = ViewModelGroup
 		}
+
+	case "T":
+		m.currentView = ViewTopology
+
+	case "?":
+		m.currentView = ViewHelp
+	}
+
+	return m, nil
+}
+
+func (m Model) handleTopologyKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	topoNodes := FlattenTopologyNodes(m.topoGraph)
+
+	switch msg.String() {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+
+	case "T":
+		m.currentView = ViewMain
+
+	case "up", "k":
+		if m.topoSelectedIdx > 0 {
+			m.topoSelectedIdx--
+		}
+
+	case "down", "j":
+		if m.topoSelectedIdx < len(topoNodes)-1 {
+			m.topoSelectedIdx++
+		}
+
+	case "enter", "d":
+		// Jump to detail view for the selected topology node.
+		if m.topoSelectedIdx < len(topoNodes) {
+			target := topoNodes[m.topoSelectedIdx]
+			for i, w := range m.workers {
+				if w.Endpoint == target.Endpoint {
+					m.selectedIdx = i
+					m.currentView = ViewDetail
+					return m, nil
+				}
+			}
+		}
+
+	case "r":
+		m.collector.PollNow(context.TODO())
+		if m.dcgmCollector != nil {
+			m.dcgmCollector.PollNow(context.TODO())
+		}
+		return m, fetchDataCmd(m.collector, m.dcgmCollector)
 
 	case "?":
 		m.currentView = ViewHelp
@@ -528,6 +590,8 @@ func (m Model) View() string {
 		return m.renderGPUDetail()
 	case ViewModelGroup:
 		return m.renderModelMain()
+	case ViewTopology:
+		return m.renderTopologyView()
 	}
 
 	return m.renderMain()
@@ -658,10 +722,20 @@ func (m Model) renderFooter() string {
 			{"e", "export"},
 			{"?", "help"},
 		}
+	case ViewTopology:
+		keys = []struct{ key, desc string }{
+			{"q", "quit"},
+			{"T", "workers"},
+			{"↑/↓", "navigate"},
+			{"enter", "detail"},
+			{"r", "refresh"},
+			{"?", "help"},
+		}
 	default:
 		keys = []struct{ key, desc string }{
 			{"q", "quit"},
 			{"m", "models"},
+			{"T", "topology"},
 			{"s", "sort"},
 			{"f", "filter"},
 			{"d", "details"},
@@ -769,6 +843,7 @@ func (m Model) renderHelp() string {
 		{"d", "Open detail view / expand model to workers"},
 		{"m", "Toggle model-grouped view; drill-down clears filter and returns to model view"},
 		{"g", "Toggle between worker and GPU views"},
+		{"T", "Toggle topology view (disaggregated prefill/decode pipeline)"},
 		{"r", "Force immediate refresh"},
 		{"e", "Export current snapshot to JSON file"},
 		{"?", "Show this help"},
@@ -789,6 +864,23 @@ func (m Model) renderHelp() string {
 			StyleHelpOverlay.Render(sb.String()),
 		),
 	)
+}
+
+func (m Model) renderTopologyView() string {
+	var sb strings.Builder
+
+	topo := RenderTopology(m.topoGraph, m.topoSelectedIdx, m.width, m.height)
+	sb.WriteString(topo)
+
+	// Fill remaining space
+	lines := strings.Count(sb.String(), "\n")
+	remaining := m.height - lines - 3
+	for i := 0; i < remaining; i++ {
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString(m.renderFooter())
+	return sb.String()
 }
 
 func renderDetailRow(label, value string) string {

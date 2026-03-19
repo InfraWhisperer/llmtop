@@ -81,7 +81,7 @@ func newTestModel() Model {
 }
 
 func TestNewModel(t *testing.T) {
-	m := NewModel(nil, nil, "0.1.0", 2, "test-ctx")
+	m := NewModel(nil, nil, "0.1.0", 2, "test-ctx", nil)
 
 	if m.version != "0.1.0" {
 		t.Errorf("expected version=0.1.0, got %s", m.version)
