@@ -173,11 +173,18 @@ func ForScope(plugins []Plugin, scope string) []Plugin {
 }
 
 // normalizeShortcut converts shortcut names to bubbletea's key string format.
-// e.g. "ctrl-l" → "ctrl+l", "shift-r" → "shift+r"
+// Bubbletea represents shift+letter as the uppercase letter itself (e.g.
+// Shift+R → "R"), not "shift+r". Ctrl combos stay as "ctrl+x".
 func normalizeShortcut(s string) string {
-	s = strings.ToLower(s)
 	s = strings.ReplaceAll(s, "-", "+")
-	return s
+	lower := strings.ToLower(s)
+
+	// "shift+x" → "X" (bubbletea sends uppercase letter for shift combos)
+	if after, ok := strings.CutPrefix(lower, "shift+"); ok && len(after) == 1 {
+		return strings.ToUpper(after)
+	}
+
+	return lower
 }
 
 // ShortcutKey returns the bubbletea-compatible key string for a plugin.

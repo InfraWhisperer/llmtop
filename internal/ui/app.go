@@ -153,6 +153,15 @@ func (m Model) Init() tea.Cmd {
 	)
 }
 
+// clearPluginStatusMsg clears the background plugin status after a delay.
+type clearPluginStatusMsg struct{}
+
+func clearPluginStatusCmd() tea.Cmd {
+	return tea.Tick(3*time.Second, func(t time.Time) tea.Msg {
+		return clearPluginStatusMsg{}
+	})
+}
+
 func tickCmd(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(t time.Time) tea.Msg {
 		return tickMsg(t)
@@ -217,6 +226,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case pluginDoneMsg:
+		if msg.err != nil {
+			m.bgPluginStatus = fmt.Sprintf("%s failed: %s", msg.name, msg.err)
+		} else if out := strings.TrimSpace(msg.stdout); out != "" {
+			// Show first line of output, truncated to fit header.
+			if idx := strings.IndexByte(out, '\n'); idx > 0 {
+				out = out[:idx]
+			}
+			if len(out) > 80 {
+				out = out[:80] + "..."
+			}
+			m.bgPluginStatus = msg.name + ": " + out
+		} else {
+			m.bgPluginStatus = msg.name + ": done"
+		}
+		// Clear the status after a few poll cycles by scheduling a delayed clear.
+		return m, clearPluginStatusCmd()
+
+	case clearPluginStatusMsg:
 		m.bgPluginStatus = ""
 		return m, nil
 
