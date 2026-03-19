@@ -213,6 +213,10 @@ func TestShortcutKeyNormalization(t *testing.T) {
 		{"Ctrl-L", "ctrl+l"},
 		{"SHIFT-T", "T"},
 		{"shift-x", "X"},
+		{"ctrl-m", "enter"},
+		{"ctrl-h", "backspace"},
+		{"ctrl-i", "tab"},
+		{"ctrl-j", "enter"},
 	}
 	for _, tt := range tests {
 		got := ShortcutKey(Plugin{ShortCut: tt.input})

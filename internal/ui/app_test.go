@@ -1,12 +1,14 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/InfraWhisperer/llmtop/internal/collector"
 	"github.com/InfraWhisperer/llmtop/internal/metrics"
+	"github.com/InfraWhisperer/llmtop/pkg/plugins"
 )
 
 // stubDCGMCollector returns a *collector.DCGMCollector that won't hit the network.
@@ -396,5 +398,115 @@ func TestDataMsgClampsSelectedIdx(t *testing.T) {
 	if model.selectedIdx >= len(model.workers) {
 		t.Errorf("expected selectedIdx to be clamped, got %d with %d workers",
 			model.selectedIdx, len(model.workers))
+	}
+}
+
+func TestPluginShiftKeyDispatch(t *testing.T) {
+	testPlugins := []plugins.Plugin{
+		{
+			Name:     "test-bg",
+			ShortCut: "shift-h",
+			Command:  "echo",
+			Args:     []string{"hello"},
+			Scopes:   []string{"worker"},
+			Background: true,
+		},
+		{
+			Name:     "test-fg",
+			ShortCut: "shift-n",
+			Command:  "echo",
+			Args:     []string{"world"},
+			Scopes:   []string{"worker"},
+		},
+	}
+
+	m := newTestModel()
+	m.plugins = testPlugins
+	m.workers = testWorkers()
+
+	// Verify shift-H (bubbletea sends "H") triggers background plugin.
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'H'}})
+	model := updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected a command from shift-H plugin dispatch, got nil")
+	}
+	if model.bgPluginStatus == "" {
+		t.Error("expected bgPluginStatus to be set for background plugin")
+	}
+	if !strings.Contains(model.bgPluginStatus, "test-bg") {
+		t.Errorf("expected bgPluginStatus to contain 'test-bg', got %q", model.bgPluginStatus)
+	}
+
+	// Verify shift-N (bubbletea sends "N") triggers foreground plugin.
+	m2 := newTestModel()
+	m2.plugins = testPlugins
+	m2.workers = testWorkers()
+	_, cmd2 := m2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
+	if cmd2 == nil {
+		t.Fatal("expected a command from shift-N plugin dispatch, got nil")
+	}
+}
+
+func TestPluginReadonlyBlocksDangerous(t *testing.T) {
+	testPlugins := []plugins.Plugin{
+		{
+			Name:      "danger",
+			ShortCut:  "shift-x",
+			Command:   "echo",
+			Args:      []string{"boom"},
+			Scopes:    []string{"worker"},
+			Dangerous: true,
+		},
+	}
+
+	m := newTestModel()
+	m.plugins = testPlugins
+	m.workers = testWorkers()
+	m.readonly = true
+
+	// Dangerous plugin should be blocked in readonly mode.
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'X'}})
+	if cmd != nil {
+		t.Error("expected dangerous plugin to be blocked in readonly mode")
+	}
+}
+
+func TestPluginConfirmDialog(t *testing.T) {
+	testPlugins := []plugins.Plugin{
+		{
+			Name:     "confirmer",
+			ShortCut: "shift-c",
+			Command:  "echo",
+			Args:     []string{"confirmed"},
+			Scopes:   []string{"worker"},
+			Confirm:  true,
+		},
+	}
+
+	m := newTestModel()
+	m.plugins = testPlugins
+	m.workers = testWorkers()
+
+	// Pressing C should show confirmation dialog.
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'C'}})
+	model := updated.(Model)
+	if model.currentView != ViewConfirm {
+		t.Errorf("expected ViewConfirm, got %d", model.currentView)
+	}
+	if model.confirmPlugin == nil {
+		t.Fatal("expected confirmPlugin to be set")
+	}
+	if model.confirmPlugin.Name != "confirmer" {
+		t.Errorf("expected confirm plugin 'confirmer', got %q", model.confirmPlugin.Name)
+	}
+
+	// Pressing 'n' should cancel.
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	model = updated.(Model)
+	if model.currentView == ViewConfirm {
+		t.Error("expected to leave ViewConfirm after cancel")
+	}
+	if cmd != nil {
+		t.Error("expected no command after cancel")
 	}
 }

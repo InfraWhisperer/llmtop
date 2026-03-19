@@ -1,6 +1,6 @@
 plugins:
   tail-logs:
-    shortCut: ctrl-l
+    shortCut: shift-l
     description: Tail worker logs
     scopes: [worker]
     command: kubectl

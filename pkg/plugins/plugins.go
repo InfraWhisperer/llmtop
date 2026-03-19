@@ -112,6 +112,17 @@ func Parse(data []byte) ([]Plugin, error) {
 	return plugins, nil
 }
 
+// unsafeCtrlCombos are ctrl shortcuts that terminals alias to special keys.
+// Plugins using these will silently fail because bubbletea never sees them
+// as "ctrl+x" — they arrive as "enter", "backspace", "tab", or "escape".
+var unsafeCtrlCombos = map[string]string{
+	"ctrl+m": "enter (CR)",
+	"ctrl+h": "backspace (BS)",
+	"ctrl+i": "tab (HT)",
+	"ctrl+j": "enter (LF)",
+	"ctrl+[": "escape (ESC)",
+}
+
 // Validate checks that a set of plugins have valid scopes and don't collide
 // with built-in shortcuts. Returns all validation errors encountered.
 func Validate(plugins []Plugin) []error {
@@ -130,6 +141,11 @@ func Validate(plugins []Plugin) []error {
 		}
 		if len(p.Scopes) == 0 {
 			errs = append(errs, fmt.Errorf("plugin %q: at least one scope required", p.Name))
+		}
+		// Warn about ctrl combos that are terminal control codes.
+		raw := strings.ToLower(strings.ReplaceAll(p.ShortCut, "-", "+"))
+		if alias, unsafe := unsafeCtrlCombos[raw]; unsafe {
+			errs = append(errs, fmt.Errorf("plugin %q: shortcut %q is a terminal control code (%s) — use shift+letter instead", p.Name, p.ShortCut, alias))
 		}
 		for _, scope := range p.Scopes {
 			if !validScopes[scope] {
@@ -172,9 +188,19 @@ func ForScope(plugins []Plugin, scope string) []Plugin {
 	return matched
 }
 
+// ctrlAliases maps ctrl combos that terminals translate to special keys.
+// Bubbletea reports these as their alias, not as "ctrl+x".
+var ctrlAliases = map[string]string{
+	"ctrl+m": "enter",
+	"ctrl+h": "backspace",
+	"ctrl+i": "tab",
+	"ctrl+j": "enter", // LF, also treated as enter
+}
+
 // normalizeShortcut converts shortcut names to bubbletea's key string format.
 // Bubbletea represents shift+letter as the uppercase letter itself (e.g.
-// Shift+R → "R"), not "shift+r". Ctrl combos stay as "ctrl+x".
+// Shift+R → "R"), not "shift+r". Certain ctrl combos are terminal control
+// codes that bubbletea reports by their alias (ctrl+m → "enter", etc.).
 func normalizeShortcut(s string) string {
 	s = strings.ReplaceAll(s, "-", "+")
 	lower := strings.ToLower(s)
@@ -182,6 +208,11 @@ func normalizeShortcut(s string) string {
 	// "shift+x" → "X" (bubbletea sends uppercase letter for shift combos)
 	if after, ok := strings.CutPrefix(lower, "shift+"); ok && len(after) == 1 {
 		return strings.ToUpper(after)
+	}
+
+	// Check for ctrl combos that terminals alias to special keys.
+	if alias, ok := ctrlAliases[lower]; ok {
+		return alias
 	}
 
 	return lower
