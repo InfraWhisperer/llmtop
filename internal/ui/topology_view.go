@@ -119,9 +119,10 @@ func BuildTopology(workers []*metrics.WorkerMetrics, topoConfig []config.Topolog
 	// Count how many workers have a role assigned.
 	prefillCount, decodeCount := 0, 0
 	for _, r := range roles {
-		if r == RolePrefill {
+		switch r {
+		case RolePrefill:
 			prefillCount++
-		} else if r == RoleDecode {
+		case RoleDecode:
 			decodeCount++
 		}
 	}
@@ -140,9 +141,10 @@ func BuildTopology(workers []*metrics.WorkerMetrics, topoConfig []config.Topolog
 			role := roles[w.Endpoint]
 			node := TopologyNode{Worker: w, Role: role}
 			g.ModelGroups[model] = append(g.ModelGroups[model], node)
-			if role == RolePrefill {
+			switch role {
+			case RolePrefill:
 				prefills = append(prefills, w.Endpoint)
-			} else if role == RoleDecode {
+			case RoleDecode:
 				decodes = append(decodes, w.Endpoint)
 			}
 		}
@@ -424,9 +426,10 @@ func renderNodeBox(n TopologyNode, selected bool, maxWidth int) string {
 	}
 
 	roleTag := "?"
-	if n.Role == RolePrefill {
+	switch n.Role {
+	case RolePrefill:
 		roleTag = "P"
-	} else if n.Role == RoleDecode {
+	case RoleDecode:
 		roleTag = "D"
 	}
 
