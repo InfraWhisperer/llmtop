@@ -1,13 +1,12 @@
-Output docs/llmtop-demo.webm
 Output docs/llmtop-demo.gif
 
-Set FontSize 14
+Set Shell zsh
+Set FontSize 16
 Set FontFamily "JetBrains Mono"
 Set Width 1400
-Set Height 660
-Set Padding 10
+Set Height 700
+Set Padding 20
 Set Theme "Catppuccin Mocha"
-Set PlaybackSpeed 1.0
 Set Framerate 30
 Set CursorBlink false
 
