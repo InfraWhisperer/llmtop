@@ -178,6 +178,10 @@ func (m Model) renderGPUMain() string {
 	sb.WriteString(header)
 	sb.WriteString("\n")
 
+	// Tab bar
+	sb.WriteString(RenderTabBar(ViewGPU, m.dcgmCollector != nil, m.width))
+	sb.WriteString("\n")
+
 	// Sort indicator
 	if m.gpuSortCol != GPUSortNone {
 		sortLine := StyleHeaderStat.Render("  Sort: ") + StyleSortIndicator.Render(GPUSortColumnName(m.gpuSortCol)+" ↓")

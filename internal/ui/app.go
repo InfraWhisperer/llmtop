@@ -276,6 +276,21 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleModelGroupKey(msg)
 	}
 
+	// Tab shortcuts available from main view
+	switch msg.String() {
+	case "1":
+		// Already on workers view
+		return m, nil
+	case "2":
+		if m.dcgmCollector != nil {
+			m.currentView = ViewGPU
+		}
+		return m, nil
+	case "4":
+		m.currentView = ViewModelGroup
+		return m, nil
+	}
+
 	// Main view
 	switch msg.String() {
 	case "q", "ctrl+c":
@@ -345,6 +360,15 @@ func (m Model) handleModelGroupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
+
+	case "1":
+		m.currentView = ViewMain
+	case "2":
+		if m.dcgmCollector != nil {
+			m.currentView = ViewGPU
+		}
+	case "4":
+		// Already on model/tenants view
 
 	case "m":
 		m.currentView = ViewMain
@@ -419,6 +443,13 @@ func (m Model) handleGPUKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
+
+	case "1":
+		m.currentView = ViewMain
+	case "2":
+		// Already on GPU view
+	case "4":
+		m.currentView = ViewModelGroup
 
 	case "g":
 		m.currentView = ViewMain
@@ -557,6 +588,10 @@ func (m Model) renderMain() string {
 	sb.WriteString(header)
 	sb.WriteString("\n")
 
+	// Tab bar
+	sb.WriteString(RenderTabBar(ViewMain, m.dcgmCollector != nil, m.width))
+	sb.WriteString("\n")
+
 	// K8s context indicator
 	if m.k8sContext != "" {
 		k8sLine := StyleHeaderStat.Render("  K8s: ") + StyleHeaderValue.Render(m.k8sContext)
@@ -609,6 +644,10 @@ func (m Model) renderModelMain() string {
 	// Header
 	header := RenderModelHeader(m.modelGroups, "v"+m.version, m.intervalSec, m.width)
 	sb.WriteString(header)
+	sb.WriteString("\n")
+
+	// Tab bar
+	sb.WriteString(RenderTabBar(ViewModelGroup, m.dcgmCollector != nil, m.width))
 	sb.WriteString("\n")
 
 	// Sort indicator
