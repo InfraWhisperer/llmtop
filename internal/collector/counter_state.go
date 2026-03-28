@@ -11,4 +11,5 @@ package collector
 type counterState struct {
 	promptTokensTotal float64
 	genTokensTotal    float64
+	preemptionsTotal  float64
 }

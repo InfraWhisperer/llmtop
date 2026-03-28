@@ -15,5 +15,6 @@ type Target struct {
 	Backend     metrics.Backend
 	MetricsPath string
 	Role        string                                    // "prefill", "decode", or "mono"
+	NodeName    string                                    // K8s node running the pod
 	FetchFunc   func(ctx context.Context) (string, error) // nil = use default HTTP fetch
 }

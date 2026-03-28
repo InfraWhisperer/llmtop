@@ -301,6 +301,7 @@ func (d *KubernetesDiscoverer) ToTargets(pods []DiscoveredPod) []Target {
 			Backend:     p.Backend,
 			MetricsPath: p.MetricsPath,
 			Role:        role,
+			NodeName:    p.NodeName,
 			FetchFunc: func(ctx context.Context) (string, error) {
 				return d.ScrapeMetrics(ctx, p)
 			},

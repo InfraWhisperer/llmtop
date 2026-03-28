@@ -201,8 +201,11 @@ func parseDCGMMetrics(gpus map[gpuKey]*metrics.GPUInfo, pm *metrics.ParsedMetric
 		util      float64
 		fbUsed    float64
 		fbFree    float64
+		memBWUtil float64
 		temp      float64
 		power     float64
+		nvlinkBW  float64
+		eccErrors float64
 		smClock   float64
 		memClock  float64
 		hasFBUsed bool
@@ -263,6 +266,12 @@ func parseDCGMMetrics(gpus map[gpuKey]*metrics.GPUInfo, pm *metrics.ParsedMetric
 			r.temp = s.Value
 		case "DCGM_FI_DEV_POWER_USAGE":
 			r.power = s.Value
+		case "DCGM_FI_DEV_MEM_COPY_UTIL":
+			r.memBWUtil = s.Value
+		case "DCGM_FI_DEV_NVLINK_BANDWIDTH_TOTAL":
+			r.nvlinkBW = s.Value
+		case "DCGM_FI_DEV_ECC_DBE_VOL_TOTAL":
+			r.eccErrors = s.Value
 		case "DCGM_FI_DEV_SM_CLOCK":
 			r.smClock = s.Value
 		case "DCGM_FI_DEV_MEM_CLOCK":
@@ -298,14 +307,18 @@ func parseDCGMMetrics(gpus map[gpuKey]*metrics.GPUInfo, pm *metrics.ParsedMetric
 			UtilPct:     r.util,
 			MemUsedMB:   r.fbUsed,
 			MemTotalMB:  memTotal,
+			MemBWUtil:   r.memBWUtil,
 			TempC:       r.temp,
 			PowerW:      r.power,
+			NVLinkGBs:   r.nvlinkBW,
+			ECCErrors:   int64(r.eccErrors),
 			SMClockMHz:  r.smClock,
 			MemClockMHz: r.memClock,
 			Pod:         r.pod,
 			Namespace:   r.namespace,
 			Container:   r.container,
 			UtilHistory: history,
+			LastScrape:  time.Now(),
 		}
 	}
 }

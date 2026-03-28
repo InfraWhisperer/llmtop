@@ -109,6 +109,20 @@ func parseVLLMMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, pre
 		}
 	}
 
+	// Preemptions (evictions) rate: compute from counter delta
+	if v, _, ok := pm.GetGaugeAny("vllm:num_preemptions_total"); ok {
+		if prev != nil && prev.Online {
+			dt := time.Since(prev.LastSeen).Seconds()
+			if dt > 0 {
+				rate := (v - prevCounters.preemptionsTotal) / dt
+				if rate < 0 {
+					rate = 0
+				}
+				m.EvictPerSec = rate
+			}
+		}
+	}
+
 	// Store raw counters for next rate calculation
 	var counters counterState
 	if v, _, ok := pm.GetGaugeAny("vllm:prompt_tokens_total"); ok {
@@ -116,6 +130,9 @@ func parseVLLMMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, pre
 	}
 	if v, _, ok := pm.GetGaugeAny("vllm:generation_tokens_total"); ok {
 		counters.genTokensTotal = v
+	}
+	if v, _, ok := pm.GetGaugeAny("vllm:num_preemptions_total"); ok {
+		counters.preemptionsTotal = v
 	}
 
 	// Dynamo runtime augmentation: Dynamo pods emit dynamo_component_* metrics

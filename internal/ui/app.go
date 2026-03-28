@@ -61,6 +61,15 @@ const (
 
 var gpuSortCycle = []GPUSortColumn{GPUSortNone, GPUSortUtil, GPUSortVRAM, GPUSortTemp, GPUSortPower}
 
+// workerSnapshot captures previous-tick state for event delta detection.
+type workerSnapshot struct {
+	Online          bool
+	KVCacheUsagePct float64
+	CacheHitRatePct float64
+	TTFT_P99        float64
+	Role            string
+}
+
 // Model is the Bubbletea application model.
 type Model struct {
 	collector     collector.MetricsSource
@@ -94,6 +103,12 @@ type Model struct {
 	modelSelectedIdx int
 	modelSortCol     ModelSortColumn
 	modelFilter      string // when set, ViewMain shows only workers for this model
+
+	// Event ring buffer for sidebar
+	events *metrics.EventRing
+
+	// Previous worker states for event detection
+	prevWorkerStates map[string]workerSnapshot
 }
 
 var filterCycle = []metrics.Backend{
@@ -122,11 +137,13 @@ var sortCycle = []SortColumn{
 // NewModel creates a new application model.
 func NewModel(c collector.MetricsSource, dc collector.GPUSource, version string, intervalSec int, k8sContext string) Model {
 	return Model{
-		collector:     c,
-		dcgmCollector: dc,
-		version:       version,
-		intervalSec:   intervalSec,
-		k8sContext:    k8sContext,
+		collector:        c,
+		dcgmCollector:    dc,
+		version:          version,
+		intervalSec:      intervalSec,
+		k8sContext:       k8sContext,
+		events:           metrics.NewEventRing(20),
+		prevWorkerStates: make(map[string]workerSnapshot),
 	}
 }
 
@@ -196,6 +213,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.modelSelectedIdx >= len(m.modelGroups) && len(m.modelGroups) > 0 {
 			m.modelSelectedIdx = len(m.modelGroups) - 1
 		}
+		// Generate events by comparing with previous state
+		m.detectEvents()
 		return m, nil
 
 	case exportDoneMsg:
@@ -580,59 +599,157 @@ func (m Model) displayWorkers() []*metrics.WorkerMetrics {
 	return display
 }
 
+// selectedWorker returns the currently selected worker, or nil.
+func (m Model) selectedWorker() *metrics.WorkerMetrics {
+	display := m.displayWorkers()
+	rows := BuildTableRows(display, filterCycle[m.filterIdx])
+	for _, r := range rows {
+		if r.worker != nil && r.dataIdx == m.selectedIdx {
+			return r.worker
+		}
+	}
+	if len(display) > 0 && m.selectedIdx < len(display) {
+		return display[m.selectedIdx]
+	}
+	return nil
+}
+
+// detectEvents compares current worker state against previous snapshot and
+// pushes events into the ring buffer when thresholds are crossed.
+func (m *Model) detectEvents() {
+	if m.events == nil {
+		return
+	}
+
+	for _, w := range m.workers {
+		key := w.Endpoint
+		prev, hadPrev := m.prevWorkerStates[key]
+
+		if !hadPrev && w.Online {
+			m.events.Push(metrics.SeverityOK, "%s joined pool", w.Label)
+		}
+		if hadPrev && prev.Online && !w.Online {
+			m.events.Push(metrics.SeverityError, "scrape fail %s", w.Label)
+		}
+		if w.Online {
+			// KV% crossed 75% threshold
+			if hadPrev && prev.KVCacheUsagePct < 75 && w.KVCacheUsagePct >= 75 {
+				m.events.Push(metrics.SeverityWarn, "KV eviction spike %s", w.Label)
+			}
+			// TTFT p99 crossed 5s
+			if hadPrev && prev.TTFT_P99 < 5000 && w.TTFT_P99 >= 5000 {
+				m.events.Push(metrics.SeverityWarn, "TTFT >5s %s", w.Label)
+			}
+			// Cache hit rate drop >10pp
+			if hadPrev && prev.CacheHitRatePct > 0 && w.CacheHitRatePct > 0 {
+				drop := prev.CacheHitRatePct - w.CacheHitRatePct
+				if drop > 10 {
+					m.events.Push(metrics.SeverityWarn, "cache hit rate fell %.0f→%.0f%%", prev.CacheHitRatePct, w.CacheHitRatePct)
+				}
+			}
+		}
+
+		m.prevWorkerStates[key] = workerSnapshot{
+			Online:          w.Online,
+			KVCacheUsagePct: w.KVCacheUsagePct,
+			CacheHitRatePct: w.CacheHitRatePct,
+			TTFT_P99:        w.TTFT_P99,
+			Role:            w.Role,
+		}
+	}
+
+	// DCGM scrape age warnings
+	for _, g := range m.gpus {
+		if !g.LastScrape.IsZero() {
+			age := time.Since(g.LastScrape)
+			if age > 30*time.Second {
+				m.events.Push(metrics.SeverityWarn, "DCGM stale %s GPU:%d", g.Hostname, g.Index)
+			}
+		}
+	}
+}
+
 func (m Model) renderMain() string {
+	showSidebar := m.width >= MinWidthForSidebar
+
+	// Compute main pane width
+	mainWidth := m.width
+	if showSidebar {
+		mainWidth = m.width - SidebarWidth - 1
+	}
+
 	var sb strings.Builder
 
-	// Header
+	// Header (full width, above the split)
 	header := RenderHeader(m.summary, "v"+m.version, m.intervalSec, m.width)
 	sb.WriteString(header)
 	sb.WriteString("\n")
 
-	// Tab bar
+	// Tab bar (full width)
 	sb.WriteString(RenderTabBar(ViewMain, m.dcgmCollector != nil, m.width))
 	sb.WriteString("\n")
+
+	// Count header lines consumed so far
+	headerLines := strings.Count(sb.String(), "\n")
+
+	// Build the main table pane content
+	var mainPane strings.Builder
 
 	// K8s context indicator
 	if m.k8sContext != "" {
 		k8sLine := StyleHeaderStat.Render("  K8s: ") + StyleHeaderValue.Render(m.k8sContext)
-		sb.WriteString(k8sLine + "\n")
+		mainPane.WriteString(k8sLine + "\n")
 	}
 
 	// Model drill-down indicator
 	if m.modelFilter != "" {
 		filterLine := StyleHeaderStat.Render("  Model: ") + StyleHeaderValue.Render(m.modelFilter)
-		sb.WriteString(filterLine + "\n")
+		mainPane.WriteString(filterLine + "\n")
 	}
 
 	// Filter indicator
 	filter := filterCycle[m.filterIdx]
 	if filter != metrics.BackendUnknown {
 		filterLine := StyleHeaderStat.Render("  Filter: ") + StyleHeaderValue.Render(string(filter))
-		sb.WriteString(filterLine + "\n")
+		mainPane.WriteString(filterLine + "\n")
 	}
 
 	// Sort indicator
 	if m.sortCol != SortNone {
 		sortLine := StyleHeaderStat.Render("  Sort: ") + StyleSortIndicator.Render(SortColumnName(m.sortCol)+" ↓")
-		sb.WriteString(sortLine + "\n")
+		mainPane.WriteString(sortLine + "\n")
+	}
+
+	mainPane.WriteString("\n")
+
+	display := m.displayWorkers()
+	table := RenderTable(display, m.selectedIdx, m.sortCol, filter, mainWidth)
+	mainPane.WriteString(table)
+
+	// Available height for the content area (below header, above footer)
+	contentHeight := m.height - headerLines - 2 // reserve for footer
+
+	// Fill main pane to content height
+	mainLines := strings.Count(mainPane.String(), "\n")
+	for i := 0; i < contentHeight-mainLines; i++ {
+		mainPane.WriteString("\n")
+	}
+
+	mainContent := mainPane.String()
+
+	if showSidebar {
+		worker := m.selectedWorker()
+		var events []metrics.Event
+		if m.events != nil {
+			events = m.events.All()
+		}
+		sidebar := RenderSidebar(worker, m.gpus, events, contentHeight)
+		sb.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, mainContent, sidebar))
+	} else {
+		sb.WriteString(mainContent)
 	}
 
 	sb.WriteString("\n")
-
-	display := m.displayWorkers()
-
-	// Table
-	table := RenderTable(display, m.selectedIdx, m.sortCol, filter, m.width)
-	sb.WriteString(table)
-
-	// Fill remaining space
-	lines := strings.Count(sb.String(), "\n")
-	remaining := m.height - lines - 3 // reserve for footer
-	for i := 0; i < remaining; i++ {
-		sb.WriteString("\n")
-	}
-
-	// Footer
 	sb.WriteString(m.renderFooter())
 
 	return sb.String()

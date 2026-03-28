@@ -203,6 +203,7 @@ func TargetToWorkerConfig(t discovery.Target) collector.WorkerConfig {
 		Backend:     t.Backend,
 		MetricsPath: t.MetricsPath,
 		Role:        t.Role,
+		NodeName:    t.NodeName,
 		FetchFunc:   t.FetchFunc,
 	}
 }

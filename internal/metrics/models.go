@@ -28,7 +28,8 @@ type WorkerMetrics struct {
 	ModelName string
 	Online    bool
 	LastSeen  time.Time
-	Role      string // "prefill", "decode", or "mono"
+	Role     string // "prefill", "decode", or "mono"
+	NodeName string // K8s node running this worker (empty for local discovery)
 
 	// Load
 	RequestsRunning int
@@ -48,6 +49,9 @@ type WorkerMetrics struct {
 	// Throughput
 	PromptTokPerSec float64
 	GenTokPerSec    float64
+
+	// KV eviction rate (preemptions per second, computed from counter)
+	EvictPerSec float64
 
 	// LMCache specific
 	StoreSizeBytes  float64
