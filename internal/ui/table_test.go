@@ -22,7 +22,7 @@ func TestBuildTableRowsPoolGrouping(t *testing.T) {
 	workers := poolTestWorkers()
 	rows := BuildTableRows(workers, "")
 
-	// Expect: PREFILL separator, 2 prefill, DECODE separator, 3 decode, ERROR separator, 1 error
+	// Expect: PREFILL separator, 2 prefill, DECODE separator, 3 decode, then 1 offline worker (no ERROR separator)
 	var separators []string
 	var dataCount int
 	for _, r := range rows {
@@ -33,17 +33,14 @@ func TestBuildTableRowsPoolGrouping(t *testing.T) {
 		}
 	}
 
-	if len(separators) != 3 {
-		t.Fatalf("expected 3 separators, got %d: %v", len(separators), separators)
+	if len(separators) != 2 {
+		t.Fatalf("expected 2 separators (PREFILL, DECODE), got %d: %v", len(separators), separators)
 	}
 	if !strings.Contains(separators[0], "PREFILL") {
 		t.Errorf("first separator should be PREFILL, got %q", separators[0])
 	}
 	if !strings.Contains(separators[1], "DECODE") {
 		t.Errorf("second separator should be DECODE, got %q", separators[1])
-	}
-	if !strings.Contains(separators[2], "ERROR") {
-		t.Errorf("third separator should be ERROR, got %q", separators[2])
 	}
 	if dataCount != 6 {
 		t.Errorf("expected 6 data rows, got %d", dataCount)
@@ -136,8 +133,9 @@ func TestRenderTableWithPools(t *testing.T) {
 	if !strings.Contains(output, "DECODE POOL") {
 		t.Error("expected DECODE POOL separator in output")
 	}
-	if !strings.Contains(output, "ERROR") {
-		t.Error("expected ERROR separator in output")
+	// No ERROR separator — offline workers render inline
+	if strings.Contains(output, "── ERROR") {
+		t.Error("ERROR separator should not appear")
 	}
 }
 

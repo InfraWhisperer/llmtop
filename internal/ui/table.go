@@ -140,12 +140,10 @@ func BuildTableRows(workers []*metrics.WorkerMetrics, filterBackend metrics.Back
 		}
 	}
 
-	if len(errWorkers) > 0 {
-		rows = append(rows, tableRow{separator: "── ERROR ──"})
-		for _, w := range errWorkers {
-			rows = append(rows, tableRow{worker: w, dataIdx: dataIdx})
-			dataIdx++
-		}
+	// Offline workers render inline at the bottom without a section header
+	for _, w := range errWorkers {
+		rows = append(rows, tableRow{worker: w, dataIdx: dataIdx})
+		dataIdx++
 	}
 
 	return rows

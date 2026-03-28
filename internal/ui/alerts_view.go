@@ -146,9 +146,9 @@ func renderAlertRow(a *metrics.Alert, selected bool, width int) string {
 func severityBadge(s metrics.AlertSeverity) string {
 	switch s {
 	case metrics.AlertCritical:
-		return styleAlertCrit.Render("CRIT")
+		return styleAlertCrit.Render("CRITICAL")
 	case metrics.AlertWarning:
-		return styleAlertWarn.Render("WARN")
+		return styleAlertWarn.Render("WARNING")
 	default:
 		return styleAlertInfo.Render("INFO")
 	}

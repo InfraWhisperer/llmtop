@@ -305,12 +305,15 @@ func runSim(scenario string, intervalSec int, once bool, outputFmt string) error
 	// Give servers a moment to bind
 	time.Sleep(50 * time.Millisecond)
 
-	// Build worker configs from sim endpoints
+	// Build worker configs with role and node metadata from sim
 	var workerConfigs []collector.WorkerConfig
-	for _, url := range s.WorkerURLs() {
+	for _, w := range s.Workers() {
 		workerConfigs = append(workerConfigs, collector.WorkerConfig{
-			Endpoint: url,
+			Endpoint: fmt.Sprintf("http://localhost:%d", w.Port),
+			Label:    w.Name,
 			Backend:  metrics.BackendUnknown,
+			Role:     w.Role,
+			NodeName: w.NodeName,
 		})
 	}
 

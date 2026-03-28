@@ -376,3 +376,30 @@ func (s *Simulator) WorkerURLs() []string {
 	}
 	return urls
 }
+
+// WorkerInfo holds metadata for a simulated worker, exported for building
+// collector.WorkerConfig entries with correct Role and NodeName.
+type WorkerInfo struct {
+	Name     string
+	Role     string
+	NodeName string
+	Port     int
+	Online   bool
+}
+
+// Workers returns metadata for all simulated workers.
+func (s *Simulator) Workers() []WorkerInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	infos := make([]WorkerInfo, 0, len(s.workers))
+	for _, w := range s.workers {
+		infos = append(infos, WorkerInfo{
+			Name:     w.Name,
+			Role:     w.Role,
+			NodeName: w.NodeName,
+			Port:     w.Port,
+			Online:   w.Online,
+		})
+	}
+	return infos
+}
