@@ -30,18 +30,23 @@ var (
 			Padding(0, 1)
 
 	styleAlertResolved = lipgloss.NewStyle().
-				Foreground(colorSubtext).
-				Faint(true)
+				Foreground(lipgloss.Color("#484f58"))
 
 	styleAlertTime = lipgloss.NewStyle().
-			Foreground(colorSubtext)
+			Foreground(lipgloss.Color("#8b949e"))
 
 	styleAlertTitle = lipgloss.NewStyle().
-			Foreground(colorWhite)
+			Foreground(colorWhite).
+			Bold(true)
 
 	styleAlertDetail = lipgloss.NewStyle().
-				Foreground(colorSubtext).
-				Faint(true)
+				Foreground(lipgloss.Color("#6e7681"))
+
+	styleAlertSelected = lipgloss.NewStyle().
+				BorderLeft(true).
+				BorderStyle(lipgloss.Border{Left: "▌"}).
+				BorderForeground(lipgloss.Color("#58a6ff")).
+				PaddingLeft(0)
 )
 
 // RenderAlertsHeader renders the alerts header with severity pill counts.
@@ -112,33 +117,34 @@ func renderAlertRow(a *metrics.Alert, selected bool, width int) string {
 		ageStr = formatDuration(time.Since(a.FiredAt))
 	}
 
-	// Title line: [BADGE]  Title  ...  Age
-	titleText := truncate(a.Title, width-30)
-	gap := width - 6 - len(a.Severity.String()) - len(titleText) - len(ageStr)
+	// Title line
+	titleText := truncate(a.Title, width-35)
+	gap := width - 14 - len(titleText) - len(ageStr)
 	if gap < 2 {
 		gap = 2
 	}
 
 	var titleLine string
 	if resolved {
-		titleLine = "  " + badge + " " +
+		titleLine = " " + badge + "  " +
 			styleAlertResolved.Render(titleText) +
 			strings.Repeat(" ", gap) +
 			styleAlertResolved.Render(ageStr)
 	} else {
-		titleLine = "  " + badge + " " +
+		titleLine = " " + badge + "  " +
 			styleAlertTitle.Render(titleText) +
 			strings.Repeat(" ", gap) +
 			styleAlertTime.Render(ageStr)
 	}
 
-	// Detail line (indented)
-	detailText := truncate(a.Detail, width-12)
-	detailLine := "           " + styleAlertDetail.Render(detailText)
+	// Detail line (indented under the badge)
+	detailText := truncate(a.Detail, width-14)
+	detailLine := "              " + styleAlertDetail.Render(detailText)
 
 	combined := titleLine + "\n" + detailLine
+
 	if selected {
-		return StyleTableRowSelected.Render(combined)
+		return styleAlertSelected.Render(combined)
 	}
 	return combined
 }
