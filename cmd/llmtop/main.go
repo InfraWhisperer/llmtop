@@ -19,6 +19,7 @@ import (
 	"github.com/InfraWhisperer/llmtop/internal/discovery"
 	"github.com/InfraWhisperer/llmtop/internal/metrics"
 	"github.com/InfraWhisperer/llmtop/pkg/config"
+	"github.com/InfraWhisperer/llmtop/pkg/plugins"
 )
 
 func init() {
@@ -64,6 +65,7 @@ func rootCmd() *cobra.Command {
 		once         bool
 		outputFmt    string
 		dcgmEndpoint string
+		readonly     bool
 		kf           k8sFlags
 	)
 
@@ -75,7 +77,7 @@ func rootCmd() *cobra.Command {
 Monitor GPU cache utilization, request queues, TTFT latency, and token
 throughput across your entire inference fleet in a single glorious view.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return run(endpoints, configFile, intervalSec, once, outputFmt, dcgmEndpoint, kf)
+			return run(endpoints, configFile, intervalSec, once, outputFmt, dcgmEndpoint, readonly, kf)
 		},
 	}
 
@@ -93,6 +95,7 @@ throughput across your entire inference fleet in a single glorious view.`,
 	cmd.Flags().BoolVarP(&kf.allNamespaces, "all-namespaces", "A", false, "Discover across all namespaces")
 	cmd.Flags().IntVar(&kf.maxConcurrent, "max-concurrent", 10, "Max concurrent K8s API proxy requests")
 	cmd.Flags().BoolVar(&kf.noK8s, "no-k8s", false, "Disable Kubernetes discovery")
+	cmd.Flags().BoolVar(&readonly, "readonly", false, "Disable dangerous plugins")
 
 	cmd.AddCommand(versionCmd())
 
@@ -109,7 +112,7 @@ func versionCmd() *cobra.Command {
 	}
 }
 
-func run(endpoints []string, configFile string, intervalSec int, once bool, outputFmt string, dcgmEndpoint string, kf k8sFlags) error {
+func run(endpoints []string, configFile string, intervalSec int, once bool, outputFmt string, dcgmEndpoint string, readonly bool, kf k8sFlags) error {
 	ctx := context.Background()
 	interval := time.Duration(intervalSec) * time.Second
 
@@ -235,6 +238,14 @@ func run(endpoints []string, configFile string, intervalSec int, once bool, outp
 		workerConfigs = append(workerConfigs, app.TargetsToWorkerConfigs(discovered)...)
 	}
 
+	// Load plugins from ~/.config/llmtop/plugins.yaml and plugins/*.yaml
+	loadedPlugins, _ := plugins.Load()
+	if errs := plugins.Validate(loadedPlugins); len(errs) > 0 {
+		for _, e := range errs {
+			fmt.Fprintf(os.Stderr, "plugin warning: %s\n", e)
+		}
+	}
+
 	return app.New(app.Options{
 		WorkerConfigs:  workerConfigs,
 		Interval:       interval,
@@ -245,6 +256,8 @@ func run(endpoints []string, configFile string, intervalSec int, once bool, outp
 		Once:           once,
 		OutputFormat:   outputFmt,
 		Version:        version,
+		Plugins:        loadedPlugins,
+		Readonly:       readonly,
 	}).Run(ctx)
 }
 

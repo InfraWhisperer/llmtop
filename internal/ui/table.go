@@ -144,6 +144,9 @@ func renderWorkerRow(w *metrics.WorkerMetrics, selected bool, epW, modelW int) s
 		ep = w.Label
 		if ep == "" {
 			ep = strings.TrimPrefix(w.Endpoint, "k8s://")
+			if qIdx := strings.Index(ep, "?"); qIdx >= 0 {
+				ep = ep[:qIdx]
+			}
 		}
 	} else {
 		ep = strings.TrimPrefix(w.Endpoint, "http://")

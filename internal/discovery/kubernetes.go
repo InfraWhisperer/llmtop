@@ -287,7 +287,7 @@ func (d *KubernetesDiscoverer) ToTargets(pods []DiscoveredPod) []Target {
 	configs := make([]Target, 0, len(pods))
 	for _, pod := range pods {
 		p := pod // capture for closure
-		endpoint := fmt.Sprintf("k8s://%s/%s", p.Namespace, p.Name)
+		endpoint := fmt.Sprintf("k8s://%s/%s?ip=%s&port=%d", p.Namespace, p.Name, p.PodIP, p.MetricsPort)
 		label := dynamoLabel(p)
 		configs = append(configs, Target{
 			Endpoint:    endpoint,
@@ -330,7 +330,7 @@ func (d *KubernetesDiscoverer) ScrapeAll(ctx context.Context, pods []DiscoveredP
 			if err != nil {
 				return
 			}
-			key := fmt.Sprintf("k8s://%s/%s", p.Namespace, p.Name)
+			key := fmt.Sprintf("k8s://%s/%s?ip=%s&port=%d", p.Namespace, p.Name, p.PodIP, p.MetricsPort)
 			mu.Lock()
 			results[key] = body
 			mu.Unlock()

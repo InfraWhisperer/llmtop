@@ -17,6 +17,7 @@ import (
 	"github.com/InfraWhisperer/llmtop/internal/discovery"
 	"github.com/InfraWhisperer/llmtop/internal/metrics"
 	"github.com/InfraWhisperer/llmtop/internal/ui"
+	"github.com/InfraWhisperer/llmtop/pkg/plugins"
 )
 
 // Options holds the resolved configuration for an App instance.
@@ -30,6 +31,8 @@ type Options struct {
 	Once           bool
 	OutputFormat   string
 	Version        string
+	Plugins        []plugins.Plugin
+	Readonly       bool
 }
 
 // App owns the llmtop application lifecycle.
@@ -138,7 +141,7 @@ func (a *App) runTUI(ctx context.Context) error {
 		go reconcileLoop(ctx, a.opts.Discoverer, a.collector, 15*time.Second)
 	}
 
-	model := ui.NewModel(a.collector, a.gpu, a.opts.Version, intervalSec, a.opts.K8sContext)
+	model := ui.NewModel(a.collector, a.gpu, a.opts.Version, intervalSec, a.opts.K8sContext, a.opts.Plugins, a.opts.Readonly)
 	p := tea.NewProgram(
 		model,
 		tea.WithAltScreen(),
@@ -233,6 +236,9 @@ func printTable(workers []*metrics.WorkerMetrics, summary metrics.FleetSummary, 
 			ep = worker.Label
 			if ep == "" {
 				ep = strings.TrimPrefix(worker.Endpoint, "k8s://")
+				if qIdx := strings.Index(ep, "?"); qIdx >= 0 {
+					ep = ep[:qIdx]
+				}
 			}
 		} else {
 			ep = strings.TrimPrefix(worker.Endpoint, "http://")

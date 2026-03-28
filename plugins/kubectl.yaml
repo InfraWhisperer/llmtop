@@ -1,0 +1,23 @@
+plugins:
+  tail-logs:
+    shortCut: shift-l
+    description: Tail worker logs
+    scopes: [worker]
+    command: kubectl
+    args: ["logs", "-f", "$POD_NAME", "-n", "$NAMESPACE", "--context", "$CONTEXT"]
+    background: false
+  restart-worker:
+    shortCut: shift-r
+    description: Restart worker pod
+    scopes: [worker]
+    command: kubectl
+    args: ["delete", "pod", "$POD_NAME", "-n", "$NAMESPACE", "--context", "$CONTEXT"]
+    confirm: true
+    dangerous: true
+  describe-pod:
+    shortCut: shift-d
+    description: Describe worker pod
+    scopes: [worker]
+    command: kubectl
+    args: ["describe", "pod", "$POD_NAME", "-n", "$NAMESPACE", "--context", "$CONTEXT"]
+    background: false
