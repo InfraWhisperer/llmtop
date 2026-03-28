@@ -14,5 +14,6 @@ type Target struct {
 	Label       string
 	Backend     metrics.Backend
 	MetricsPath string
+	Role        string                                    // "prefill", "decode", or "mono"
 	FetchFunc   func(ctx context.Context) (string, error) // nil = use default HTTP fetch
 }

@@ -202,6 +202,7 @@ func TargetToWorkerConfig(t discovery.Target) collector.WorkerConfig {
 		Label:       t.Label,
 		Backend:     t.Backend,
 		MetricsPath: t.MetricsPath,
+		Role:        t.Role,
 		FetchFunc:   t.FetchFunc,
 	}
 }
@@ -221,7 +222,7 @@ func printTable(workers []*metrics.WorkerMetrics, summary metrics.FleetSummary, 
 		summary.TotalTokPerSec, summary.AvgCacheHit, summary.P99TTFT)
 
 	w := tabwriter.NewWriter(os.Stdout, 2, 2, 2, ' ', 0)
-	_, _ = fmt.Fprintln(w, "ENDPOINT\tBACKEND\tMODEL\tKV%\tQUEUE\tRUN\tTTFT P99\tITL P99\tHIT%\tTOK/S")
+	_, _ = fmt.Fprintln(w, "ROLE\tENDPOINT\tBACKEND\tMODEL\tKV%\tQUEUE\tRUN\tTTFT P99\tITL P99\tHIT%\tTOK/S")
 	_, _ = fmt.Fprintln(w, strings.Repeat("\u2500", 100))
 	for _, worker := range workers {
 		status := "\u25cf"
@@ -244,8 +245,12 @@ func printTable(workers []*metrics.WorkerMetrics, summary metrics.FleetSummary, 
 		if model == "" {
 			model = "\u2014"
 		}
-		_, _ = fmt.Fprintf(w, "%s %s\t%s\t%s\t%.0f%%\t%d\t%d\t%.0fms\t%.0fms\t%.0f%%\t%.0f\n",
-			status, ep,
+		role := worker.Role
+		if role == "" {
+			role = "mono"
+		}
+		_, _ = fmt.Fprintf(w, "%s\t%s %s\t%s\t%s\t%.0f%%\t%d\t%d\t%.0fms\t%.0fms\t%.0f%%\t%.0f\n",
+			role, status, ep,
 			string(worker.Backend),
 			model,
 			worker.KVCacheUsagePct,

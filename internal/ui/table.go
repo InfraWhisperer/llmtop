@@ -12,8 +12,10 @@ import (
 
 // Fixed column widths for numeric/compact columns
 const (
+	colRole    = 8
 	colBackend = 8
 	colKV      = 6
+	colKVBar   = 6
 	colQueue   = 6
 	colRun     = 5
 	colTTFT    = 10
@@ -23,9 +25,9 @@ const (
 )
 
 // fixedWidth is the sum of all fixed columns + inter-column spaces + left margin + dot.
-// Layout: "  " (2) + dot (1) + " " (1) + ep + " " + backend + " " + model + " " + kv + " " + queue + " " + run + " " + ttft + " " + itl + " " + hit + " " + tok
-// Overhead: 2 (margin) + 1 (dot) + 1 (space) + 9 (inter-column spaces) = 13
-var fixedWidth = colBackend + colKV + colQueue + colRun + colTTFT + colITL + colHit + colTok + 13
+// Layout: "  " (2) + dot (1) + " " (1) + role + " " + ep + " " + backend + " " + model + " " + kv + " " + kvbar + " " + queue + " " + run + " " + ttft + " " + itl + " " + hit + " " + tok
+// Overhead: 2 (margin) + 1 (dot) + 1 (space) + 11 (inter-column spaces) = 15
+var fixedWidth = colRole + colBackend + colKV + colKVBar + colQueue + colRun + colTTFT + colITL + colHit + colTok + 15
 
 // flexWidths computes dynamic ENDPOINT and MODEL column widths from terminal width.
 func flexWidths(termWidth int) (epW, modelW int) {
@@ -74,7 +76,117 @@ func SortColumnName(s SortColumn) string {
 	}
 }
 
-// RenderTable renders the worker metrics table.
+// tableRow represents either a data row (worker) or a separator row.
+type tableRow struct {
+	worker    *metrics.WorkerMetrics // nil for separator rows
+	separator string                 // non-empty for separator rows
+	dataIdx   int                    // index into the original workers slice (for selection)
+}
+
+// BuildTableRows groups workers into pool sections and returns a flat list of rows
+// with separator headers. Returns (rows, mapping from display index to data index).
+func BuildTableRows(workers []*metrics.WorkerMetrics, filterBackend metrics.Backend) []tableRow {
+	var prefill, decode, errWorkers, mono []*metrics.WorkerMetrics
+
+	for _, w := range workers {
+		if filterBackend != "" && w.Backend != filterBackend && filterBackend != metrics.BackendUnknown {
+			continue
+		}
+		if !w.Online {
+			errWorkers = append(errWorkers, w)
+			continue
+		}
+		switch w.Role {
+		case "prefill":
+			prefill = append(prefill, w)
+		case "decode":
+			decode = append(decode, w)
+		default:
+			mono = append(mono, w)
+		}
+	}
+
+	hasPools := len(prefill) > 0 || len(decode) > 0
+	var rows []tableRow
+	dataIdx := 0
+
+	if hasPools {
+		if len(prefill) > 0 {
+			rows = append(rows, tableRow{separator: fmt.Sprintf("── PREFILL POOL (%d workers) ──", len(prefill))})
+			for _, w := range prefill {
+				rows = append(rows, tableRow{worker: w, dataIdx: dataIdx})
+				dataIdx++
+			}
+		}
+		if len(decode) > 0 {
+			rows = append(rows, tableRow{separator: fmt.Sprintf("── DECODE POOL (%d workers) ──", len(decode))})
+			for _, w := range decode {
+				rows = append(rows, tableRow{worker: w, dataIdx: dataIdx})
+				dataIdx++
+			}
+		}
+		if len(mono) > 0 {
+			rows = append(rows, tableRow{separator: fmt.Sprintf("── MONO (%d workers) ──", len(mono))})
+			for _, w := range mono {
+				rows = append(rows, tableRow{worker: w, dataIdx: dataIdx})
+				dataIdx++
+			}
+		}
+	} else {
+		// No prefill/decode roles detected — render flat list without pool headers
+		for _, w := range mono {
+			rows = append(rows, tableRow{worker: w, dataIdx: dataIdx})
+			dataIdx++
+		}
+	}
+
+	if len(errWorkers) > 0 {
+		rows = append(rows, tableRow{separator: "── ERROR ──"})
+		for _, w := range errWorkers {
+			rows = append(rows, tableRow{worker: w, dataIdx: dataIdx})
+			dataIdx++
+		}
+	}
+
+	return rows
+}
+
+// DataRowCount returns the number of selectable (non-separator) rows.
+func DataRowCount(rows []tableRow) int {
+	n := 0
+	for _, r := range rows {
+		if r.worker != nil {
+			n++
+		}
+	}
+	return n
+}
+
+// NextDataRow returns the next selectable row index after moving in the given direction.
+// direction: +1 for down, -1 for up. currentDataIdx is the current selected data index.
+func NextDataRow(rows []tableRow, currentDataIdx, direction int) int {
+	// Find current display index
+	displayIdx := -1
+	for i, r := range rows {
+		if r.worker != nil && r.dataIdx == currentDataIdx {
+			displayIdx = i
+			break
+		}
+	}
+	if displayIdx < 0 {
+		return currentDataIdx
+	}
+
+	// Move in direction, skipping separators
+	for i := displayIdx + direction; i >= 0 && i < len(rows); i += direction {
+		if rows[i].worker != nil {
+			return rows[i].dataIdx
+		}
+	}
+	return currentDataIdx
+}
+
+// RenderTable renders the worker metrics table with pool grouping.
 func RenderTable(workers []*metrics.WorkerMetrics, selectedIdx int, sortCol SortColumn, filterBackend metrics.Backend, width int) string {
 	var sb strings.Builder
 	epW, modelW := flexWidths(width)
@@ -87,11 +199,16 @@ func RenderTable(workers []*metrics.WorkerMetrics, selectedIdx int, sortCol Sort
 	sb.WriteString("    " + sep)
 	sb.WriteString("\n")
 
-	for i, w := range workers {
-		if filterBackend != "" && w.Backend != filterBackend && filterBackend != metrics.BackendUnknown {
+	rows := BuildTableRows(workers, filterBackend)
+
+	for _, r := range rows {
+		if r.separator != "" {
+			sb.WriteString("  ")
+			sb.WriteString(StylePoolSeparator.Render(r.separator))
+			sb.WriteString("\n")
 			continue
 		}
-		row := renderWorkerRow(w, i == selectedIdx, epW, modelW)
+		row := renderWorkerRow(r.worker, r.dataIdx == selectedIdx, epW, modelW)
 		sb.WriteString(row)
 		sb.WriteString("\n")
 	}
@@ -105,10 +222,12 @@ func renderTableHeader(sortCol SortColumn, epW, modelW int) string {
 		width int
 		col   SortColumn
 	}{
-		{"ENDPOINT", epW, SortNone},
+		{"ROLE", colRole, SortNone},
+		{"WORKER", epW, SortNone},
 		{"BACKEND", colBackend, SortNone},
 		{"MODEL", modelW, SortNone},
 		{"KV%", colKV, SortKVCache},
+		{"KV BAR", colKVBar, SortNone},
 		{"QUEUE", colQueue, SortQueue},
 		{"RUN", colRun, SortNone},
 		{"TTFT P99", colTTFT, SortTTFT},
@@ -138,6 +257,13 @@ func renderWorkerRow(w *metrics.WorkerMetrics, selected bool, epW, modelW int) s
 		dot = StyleDotOffline.Render("○")
 	}
 
+	// Role badge
+	role := w.Role
+	if role == "" {
+		role = "mono"
+	}
+	rolePlain := padRight(role, colRole)
+
 	// Endpoint display: K8s workers show pod name, others show URL
 	var ep string
 	if strings.HasPrefix(w.Endpoint, "k8s://") {
@@ -161,10 +287,9 @@ func renderWorkerRow(w *metrics.WorkerMetrics, selected bool, epW, modelW int) s
 	modelStr := padRight(truncate(model, modelW), modelW)
 
 	if !w.Online {
-		// Offline row: all metric columns show "Err", no per-cell styling needed
 		backendStr := padRight(string(w.Backend), colBackend)
-		row := "  " + dot + " " + epStr + " " + backendStr + " " + modelStr + " " +
-			padRight("Err", colKV) + " " + padRight("Err", colQueue) + " " + padRight("Err", colRun) + " " +
+		row := "  " + dot + " " + rolePlain + " " + epStr + " " + backendStr + " " + modelStr + " " +
+			padRight("Err", colKV) + " " + padRight("─", colKVBar) + " " + padRight("Err", colQueue) + " " + padRight("Err", colRun) + " " +
 			padRight("Err", colTTFT) + " " + padRight("Err", colITL) + " " +
 			padRight("Err", colHit) + " " + padRight("Err", colTok)
 		if selected {
@@ -173,9 +298,9 @@ func renderWorkerRow(w *metrics.WorkerMetrics, selected bool, epW, modelW int) s
 		return StyleTableRowOffline.Render(row)
 	}
 
-	// Format all values as plain padded strings first — style applied at the end
 	backendPlain := padRight(string(w.Backend), colBackend)
 	kvPlain := formatKVCache(w.KVCacheUsagePct, colKV)
+	kvBar := RenderKVBar(w.KVCacheUsagePct, colKVBar)
 	queuePlain := formatQueue(w.RequestsWaiting, colQueue)
 	runPlain := padRight(fmt.Sprintf("%d", w.RequestsRunning), colRun)
 	ttftPlain := formatTTFT(w.TTFT_P99, colTTFT)
@@ -184,17 +309,19 @@ func renderWorkerRow(w *metrics.WorkerMetrics, selected bool, epW, modelW int) s
 	tokPlain := formatTokPerSec(w.GenTokPerSec+w.PromptTokPerSec, colTok)
 
 	if selected {
-		plain := "  " + dot + " " + epStr + " " + backendPlain + " " + modelStr + " " +
-			kvPlain + " " + queuePlain + " " + runPlain + " " + ttftPlain + " " + itlPlain + " " +
+		plain := "  " + dot + " " + rolePlain + " " + epStr + " " + backendPlain + " " + modelStr + " " +
+			kvPlain + " " + kvBar + " " + queuePlain + " " + runPlain + " " + ttftPlain + " " + itlPlain + " " +
 			hitPlain + " " + tokPlain
 		return StyleTableRowSelected.Render(plain)
 	}
 
-	// Unselected: apply per-cell color styles
-	return "  " + dot + " " + epStr + " " +
+	return "  " + dot + " " +
+		RoleStyle(role).Render(rolePlain) + " " +
+		epStr + " " +
 		backendStyle(w.Backend).Render(backendPlain) + " " +
 		modelStr + " " +
 		kvCacheStyle(w.KVCacheUsagePct, kvPlain) + " " +
+		kvBar + " " +
 		queueStyle(w.RequestsWaiting, queuePlain) + " " +
 		runPlain + " " +
 		ttftStyle(w.TTFT_P99, ttftPlain) + " " +

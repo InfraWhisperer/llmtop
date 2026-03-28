@@ -39,10 +39,15 @@ type DiscoveredPod struct {
 
 // Dynamo label keys
 const (
-	dynamoComponentPodLabel    = "nvidia.com/dynamo-component-pod"
-	dynamoComponentTypeLabel   = "nvidia.com/dynamo-component-type"
-	dynamoSubComponentLabel    = "nvidia.com/dynamo-sub-component-type"
-	dynamoComponentNameLabel   = "nvidia.com/dynamo-component"
+	dynamoComponentTypeLabel = "nvidia.com/dynamo-component-type"
+	dynamoSubComponentLabel  = "nvidia.com/dynamo-sub-component-type"
+)
+
+// Role detection label keys, checked in priority order (highest first).
+const (
+	labelGroveRole     = "nvidia.com/grove-role"
+	labelLLMDRole      = "llm-d.ai/role"
+	labelK8sComponent  = "app.kubernetes.io/component"
 )
 
 // KubernetesDiscoverer discovers LLM inference pods and scrapes their metrics
@@ -289,17 +294,61 @@ func (d *KubernetesDiscoverer) ToTargets(pods []DiscoveredPod) []Target {
 		p := pod // capture for closure
 		endpoint := fmt.Sprintf("k8s://%s/%s", p.Namespace, p.Name)
 		label := dynamoLabel(p)
+		role := DetectRole(p)
 		configs = append(configs, Target{
 			Endpoint:    endpoint,
 			Label:       label,
 			Backend:     p.Backend,
 			MetricsPath: p.MetricsPath,
+			Role:        role,
 			FetchFunc: func(ctx context.Context) (string, error) {
 				return d.ScrapeMetrics(ctx, p)
 			},
 		})
 	}
 	return configs
+}
+
+// DetectRole determines the worker role from pod labels using priority order:
+// grove-role > llm-d role > component label > DynamoRole > default "mono".
+func DetectRole(p DiscoveredPod) string {
+	// Priority 1: nvidia.com/grove-role
+	if v, ok := p.Labels[labelGroveRole]; ok {
+		if r := normalizeRole(v); r != "" {
+			return r
+		}
+	}
+	// Priority 2: llm-d.ai/role
+	if v, ok := p.Labels[labelLLMDRole]; ok {
+		if r := normalizeRole(v); r != "" {
+			return r
+		}
+	}
+	// Priority 3: app.kubernetes.io/component
+	if v, ok := p.Labels[labelK8sComponent]; ok {
+		if r := normalizeRole(v); r != "" {
+			return r
+		}
+	}
+	// Priority 4: Dynamo sub-component role (already parsed in DiscoverPods)
+	if p.DynamoRole == "prefill" || p.DynamoRole == "decode" {
+		return p.DynamoRole
+	}
+	return "mono"
+}
+
+// normalizeRole maps a label value to a canonical role string.
+func normalizeRole(v string) string {
+	v = strings.ToLower(v)
+	switch v {
+	case "prefill":
+		return "prefill"
+	case "decode":
+		return "decode"
+	case "mono", "monolithic":
+		return "mono"
+	}
+	return ""
 }
 
 // dynamoLabel builds a human-friendly label for a pod.

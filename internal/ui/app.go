@@ -282,14 +282,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case "up", "k":
-		if m.selectedIdx > 0 {
-			m.selectedIdx--
-		}
+		rows := BuildTableRows(m.displayWorkers(), filterCycle[m.filterIdx])
+		m.selectedIdx = NextDataRow(rows, m.selectedIdx, -1)
 
 	case "down", "j":
-		if m.selectedIdx < len(m.workers)-1 {
-			m.selectedIdx++
-		}
+		rows := BuildTableRows(m.displayWorkers(), filterCycle[m.filterIdx])
+		m.selectedIdx = NextDataRow(rows, m.selectedIdx, +1)
 
 	case "s":
 		// Cycle sort column
@@ -533,6 +531,24 @@ func (m Model) View() string {
 	return m.renderMain()
 }
 
+// displayWorkers returns the worker slice to display, applying model drill-down filter.
+func (m Model) displayWorkers() []*metrics.WorkerMetrics {
+	if m.modelFilter == "" {
+		return m.workers
+	}
+	var display []*metrics.WorkerMetrics
+	for _, w := range m.workers {
+		name := w.ModelName
+		if name == "" {
+			name = "Unknown"
+		}
+		if name == m.modelFilter {
+			display = append(display, w)
+		}
+	}
+	return display
+}
+
 func (m Model) renderMain() string {
 	var sb strings.Builder
 
@@ -568,21 +584,7 @@ func (m Model) renderMain() string {
 
 	sb.WriteString("\n")
 
-	// Build the worker slice to display — apply model drill-down filter.
-	var display []*metrics.WorkerMetrics
-	if m.modelFilter != "" {
-		for _, w := range m.workers {
-			name := w.ModelName
-			if name == "" {
-				name = "Unknown"
-			}
-			if name == m.modelFilter {
-				display = append(display, w)
-			}
-		}
-	} else {
-		display = m.workers
-	}
+	display := m.displayWorkers()
 
 	// Table
 	table := RenderTable(display, m.selectedIdx, m.sortCol, filter, m.width)
@@ -701,6 +703,11 @@ func (m Model) renderDetail() string {
 	}
 	sb.WriteString(renderDetailRow("Backend", string(w.Backend)))
 	sb.WriteString(renderDetailRow("Model", orDash(w.ModelName)))
+	role := w.Role
+	if role == "" {
+		role = "mono"
+	}
+	sb.WriteString(renderDetailRow("Role", role))
 	status := "● Online"
 	if !w.Online {
 		status = "○ Offline"
@@ -717,7 +724,10 @@ func (m Model) renderDetail() string {
 
 	// Cache metrics
 	sb.WriteString(StyleDetailSection.Render("KV Cache") + "\n")
-	sb.WriteString(renderDetailRow("KV Cache Usage", fmt.Sprintf("%.1f%%", w.KVCacheUsagePct)))
+	sb.WriteString(renderDetailRow("KV Cache GPU", fmt.Sprintf("%.1f%%", w.KVCacheUsagePct)))
+	if w.KVCacheUsageCPUPct > 0 {
+		sb.WriteString(renderDetailRow("KV Cache CPU", fmt.Sprintf("%.1f%%", w.KVCacheUsageCPUPct)))
+	}
 	sb.WriteString(renderDetailRow("Cache Hit Rate", fmt.Sprintf("%.1f%%", w.CacheHitRatePct)))
 	if w.StoreSizeBytes > 0 {
 		sb.WriteString(renderDetailRow("Store Size", formatBytes(w.StoreSizeBytes)))

@@ -51,6 +51,11 @@ func parseVLLMMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, pre
 		m.KVCacheUsagePct = v * 100
 	}
 
+	// CPU KV cache usage (0.0-1.0 → convert to 0-100%, may be absent)
+	if v, _, ok := pm.GetGaugeAny("vllm:cpu_cache_usage_perc"); ok {
+		m.KVCacheUsageCPUPct = v * 100
+	}
+
 	// Prefix cache hit rate (0.0-1.0 → convert to 0-100%)
 	// Newer vLLM exports counters (prefix_cache_hits_total / prefix_cache_queries_total) instead of a gauge
 	if v, _, ok := pm.GetGaugeAny("vllm:gpu_prefix_cache_hit_rate"); ok {

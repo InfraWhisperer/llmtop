@@ -28,14 +28,16 @@ type WorkerMetrics struct {
 	ModelName string
 	Online    bool
 	LastSeen  time.Time
+	Role      string // "prefill", "decode", or "mono"
 
 	// Load
 	RequestsRunning int
 	RequestsWaiting int
 
 	// KV Cache
-	KVCacheUsagePct float64 // 0-100
-	CacheHitRatePct float64 // 0-100
+	KVCacheUsagePct    float64 // 0-100 (GPU)
+	KVCacheUsageCPUPct float64 // 0-100 (CPU, may be absent)
+	CacheHitRatePct    float64 // 0-100
 
 	// Latency (milliseconds)
 	TTFT_P50 float64
@@ -62,8 +64,11 @@ type FleetSummary struct {
 	OnlineWorkers  int
 	TotalReqPerSec float64
 	AvgCacheHit    float64
+	AvgKVPercGPU   float64 // cluster-wide average GPU KV cache usage (0-100)
 	P99TTFT        float64
 	TotalTokPerSec float64
+	PrefillCount   int
+	DecodeCount    int
 }
 
 // ComputeFleetSummary computes aggregate stats from a slice of worker metrics.
@@ -73,14 +78,26 @@ func ComputeFleetSummary(workers []*WorkerMetrics) FleetSummary {
 	}
 	var cacheHitSum float64
 	var cacheCount int
+	var kvGPUSum float64
+	var kvGPUCount int
 	var maxTTFT float64
 	for _, w := range workers {
+		switch w.Role {
+		case "prefill":
+			s.PrefillCount++
+		case "decode":
+			s.DecodeCount++
+		}
 		if w.Online {
 			s.OnlineWorkers++
 			s.TotalTokPerSec += w.PromptTokPerSec + w.GenTokPerSec
 			if w.CacheHitRatePct > 0 {
 				cacheHitSum += w.CacheHitRatePct
 				cacheCount++
+			}
+			if w.KVCacheUsagePct > 0 {
+				kvGPUSum += w.KVCacheUsagePct
+				kvGPUCount++
 			}
 			if w.TTFT_P99 > maxTTFT {
 				maxTTFT = w.TTFT_P99
@@ -89,6 +106,9 @@ func ComputeFleetSummary(workers []*WorkerMetrics) FleetSummary {
 	}
 	if cacheCount > 0 {
 		s.AvgCacheHit = cacheHitSum / float64(cacheCount)
+	}
+	if kvGPUCount > 0 {
+		s.AvgKVPercGPU = kvGPUSum / float64(kvGPUCount)
 	}
 	s.P99TTFT = maxTTFT
 	return s

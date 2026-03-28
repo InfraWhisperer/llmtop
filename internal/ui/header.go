@@ -21,11 +21,13 @@ func RenderHeader(summary metrics.FleetSummary, version string, intervalSec int,
 
 	tokPerSec := StyleHeaderValue.Render(fmt.Sprintf("%.0f tok/s", summary.TotalTokPerSec))
 
-	cacheHit := StyleHeaderValue.Render(fmt.Sprintf("%.0f%%", summary.AvgCacheHit))
+	cacheHit := renderCacheHitPill(summary.AvgKVPercGPU)
 	cacheLabel := StyleHeaderStat.Render("cache hit")
 
 	ttft := StyleHeaderValue.Render(fmt.Sprintf("%.0fms", summary.P99TTFT))
 	ttftLabel := StyleHeaderStat.Render("P99 TTFT")
+
+	poolHealth := renderPoolHealthPill(summary.PrefillCount, summary.DecodeCount)
 
 	interval := StyleHeaderStat.Render(fmt.Sprintf("↻ %ds", intervalSec))
 
@@ -41,9 +43,14 @@ func RenderHeader(summary metrics.FleetSummary, version string, intervalSec int,
 		cacheLabel + " " + cacheHit,
 		dot,
 		ttftLabel + " " + ttft,
-		dot,
-		interval + " ",
 	}
+
+	// Only show pool health pill when P/D roles are detected
+	if summary.PrefillCount > 0 || summary.DecodeCount > 0 {
+		parts = append(parts, dot, poolHealth)
+	}
+
+	parts = append(parts, dot, interval+" ")
 
 	header := ""
 	for _, p := range parts {
@@ -55,4 +62,24 @@ func RenderHeader(summary metrics.FleetSummary, version string, intervalSec int,
 		Background(colorDark).
 		Foreground(colorWhite).
 		Render(header)
+}
+
+// renderCacheHitPill formats the cache hit percentage with color:
+// amber if <30%, green if ≥30%.
+func renderCacheHitPill(pct float64) string {
+	text := fmt.Sprintf("%.0f%%", pct)
+	if pct < 30 {
+		return StyleHeaderAmber.Render(text)
+	}
+	return StyleHeaderValue.Render(text)
+}
+
+// renderPoolHealthPill renders the "3P·5D" pool health indicator.
+// Red if either prefill or decode count is 0.
+func renderPoolHealthPill(prefill, decode int) string {
+	text := fmt.Sprintf("%dP·%dD", prefill, decode)
+	if prefill == 0 || decode == 0 {
+		return StyleHeaderRed.Render(text)
+	}
+	return StyleHeaderValue.Render(text)
 }
