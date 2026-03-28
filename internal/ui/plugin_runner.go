@@ -3,6 +3,7 @@ package ui
 import (
 	"bytes"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -60,31 +61,42 @@ func workerEnv(w *metrics.WorkerMetrics, k8sContext string) map[string]string {
 		"$CONTEXT":      k8sContext,
 	}
 
-	// Extract K8s metadata from the label or endpoint.
-	// K8s-discovered workers use labels like "pod-name/namespace" or
-	// endpoints like "k8s://pod-name.namespace:port".
+	// Extract K8s metadata from the endpoint.
+	// K8s-discovered workers use endpoints like "k8s://namespace/pod-name?ip=10.0.0.1&port=8000".
 	if trimmed, ok := strings.CutPrefix(w.Endpoint, "k8s://"); ok {
-		// Format: pod-name.namespace:port
-		if dotIdx := strings.Index(trimmed, "."); dotIdx > 0 {
-			env["$POD_NAME"] = trimmed[:dotIdx]
-			rest := trimmed[dotIdx+1:]
-			if colonIdx := strings.Index(rest, ":"); colonIdx > 0 {
-				env["$NAMESPACE"] = rest[:colonIdx]
-			} else {
-				env["$NAMESPACE"] = rest
+		// Split off query string first.
+		path := trimmed
+		var query url.Values
+		if qIdx := strings.Index(trimmed, "?"); qIdx >= 0 {
+			path = trimmed[:qIdx]
+			query, _ = url.ParseQuery(trimmed[qIdx+1:])
+		}
+		parts := strings.SplitN(path, "/", 2)
+		if len(parts) == 2 {
+			env["$NAMESPACE"] = parts[0]
+			env["$POD_NAME"] = parts[1]
+		}
+		// Build a real HTTP endpoint from pod IP + port for curl-based plugins.
+		if query != nil {
+			if ip := query.Get("ip"); ip != "" {
+				port := query.Get("port")
+				if port == "" {
+					port = "8000"
+				}
+				env["$ENDPOINT"] = "http://" + ip + ":" + port
+				env["$PORT"] = port
 			}
 		}
 	}
 
-	// Parse label for pod/namespace if not already set from endpoint.
+	// Parse label for pod name if not already set from endpoint.
+	// Dynamo labels use "role:pod-name" format; strip the role prefix.
 	if env["$POD_NAME"] == "" && w.Label != "" {
-		parts := strings.SplitN(w.Label, "/", 2)
-		if len(parts) == 2 {
-			env["$NAMESPACE"] = parts[0]
-			env["$POD_NAME"] = parts[1]
-		} else {
-			env["$POD_NAME"] = w.Label
+		label := w.Label
+		if colonIdx := strings.Index(label, ":"); colonIdx >= 0 {
+			label = label[colonIdx+1:]
 		}
+		env["$POD_NAME"] = label
 	}
 
 	// Fill empty values with placeholders so args don't have bare $VAR tokens.

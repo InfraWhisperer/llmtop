@@ -236,6 +236,9 @@ func printTable(workers []*metrics.WorkerMetrics, summary metrics.FleetSummary, 
 			ep = worker.Label
 			if ep == "" {
 				ep = strings.TrimPrefix(worker.Endpoint, "k8s://")
+				if qIdx := strings.Index(ep, "?"); qIdx >= 0 {
+					ep = ep[:qIdx]
+				}
 			}
 		} else {
 			ep = strings.TrimPrefix(worker.Endpoint, "http://")
