@@ -6,10 +6,10 @@ Set Width 1400
 Set Height 580
 Set Theme "Catppuccin Mocha"
 Set PlaybackSpeed 1.0
-Set FrameRate 24
+Set Framerate 24
 
 # Start llmtop in sim+demo mode
-Type "llmtop --sim --scenario demo"
+Type "./llmtop --sim --scenario demo"
 Enter
 Sleep 5s
 
