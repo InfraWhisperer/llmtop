@@ -1,12 +1,15 @@
+Output docs/llmtop-demo.webm
 Output docs/llmtop-demo.gif
 
-Set FontSize 13
+Set FontSize 14
 Set FontFamily "JetBrains Mono"
 Set Width 1400
-Set Height 580
+Set Height 660
+Set Padding 10
 Set Theme "Catppuccin Mocha"
 Set PlaybackSpeed 1.0
-Set Framerate 24
+Set Framerate 30
+Set CursorBlink false
 
 # Start llmtop in sim+demo mode
 Type "./llmtop --sim --scenario demo"
