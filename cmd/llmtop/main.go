@@ -18,6 +18,7 @@ import (
 	"github.com/InfraWhisperer/llmtop/internal/collector"
 	"github.com/InfraWhisperer/llmtop/internal/discovery"
 	"github.com/InfraWhisperer/llmtop/internal/metrics"
+	"github.com/InfraWhisperer/llmtop/internal/sim"
 	"github.com/InfraWhisperer/llmtop/pkg/config"
 )
 
@@ -69,6 +70,8 @@ func rootCmd() *cobra.Command {
 		outputFmt    string
 		dcgmEndpoint string
 		kf           k8sFlags
+		simMode      bool
+		simScenario  string
 	)
 
 	cmd := &cobra.Command{
@@ -79,6 +82,9 @@ func rootCmd() *cobra.Command {
 Monitor GPU cache utilization, request queues, TTFT latency, and token
 throughput across your entire inference fleet in a single glorious view.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if simMode {
+				return runSim(simScenario, intervalSec, once, outputFmt)
+			}
 			return run(endpoints, configFile, intervalSec, once, outputFmt, dcgmEndpoint, kf)
 		},
 	}
@@ -97,6 +103,10 @@ throughput across your entire inference fleet in a single glorious view.`,
 	cmd.Flags().BoolVarP(&kf.allNamespaces, "all-namespaces", "A", false, "Discover across all namespaces")
 	cmd.Flags().IntVar(&kf.maxConcurrent, "max-concurrent", 10, "Max concurrent K8s API proxy requests")
 	cmd.Flags().BoolVar(&kf.noK8s, "no-k8s", false, "Disable Kubernetes discovery")
+
+	// Simulation flags
+	cmd.Flags().BoolVar(&simMode, "sim", false, "Run with built-in simulation harness (no real cluster needed)")
+	cmd.Flags().StringVar(&simScenario, "scenario", "steady", `Sim scenario: "steady", "demo", "stress", "chaos"`)
 
 	cmd.AddCommand(versionCmd())
 
@@ -277,4 +287,40 @@ func parseBackend(s string) metrics.Backend {
 	default:
 		return metrics.BackendUnknown
 	}
+}
+
+func runSim(scenario string, intervalSec int, once bool, outputFmt string) error {
+	ctx := context.Background()
+	interval := time.Duration(intervalSec) * time.Second
+
+	cfg := sim.DefaultConfig()
+	cfg.Scenario = scenario
+
+	s := sim.New(cfg)
+	if err := s.Start(); err != nil {
+		return fmt.Errorf("starting simulator: %w", err)
+	}
+	defer s.Stop()
+
+	// Give servers a moment to bind
+	time.Sleep(50 * time.Millisecond)
+
+	// Build worker configs from sim endpoints
+	var workerConfigs []collector.WorkerConfig
+	for _, url := range s.WorkerURLs() {
+		workerConfigs = append(workerConfigs, collector.WorkerConfig{
+			Endpoint: url,
+			Backend:  metrics.BackendUnknown,
+		})
+	}
+
+	return app.New(app.Options{
+		WorkerConfigs: workerConfigs,
+		Interval:      interval,
+		DCGMEndpoint:  s.DCGMURL(),
+		K8sContext:    "sim-cluster",
+		Once:          once,
+		OutputFormat:  outputFmt,
+		Version:       version,
+	}).Run(ctx)
 }
