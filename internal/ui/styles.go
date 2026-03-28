@@ -1,10 +1,19 @@
 package ui
 
 import (
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
+
+func init() {
+	// Respect NO_COLOR convention: https://no-color.org/
+	if _, ok := os.LookupEnv("NO_COLOR"); ok {
+		lipgloss.SetColorProfile(termenv.Ascii)
+	}
+}
 
 var (
 	// Color palette

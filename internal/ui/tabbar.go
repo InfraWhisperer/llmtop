@@ -36,7 +36,7 @@ func RenderTabBar(activeView View, hasGPU bool, width int) string {
 		{Name: "KV Cache", Key: "3", Active: activeView == ViewKVCache, Enabled: true},
 		{Name: "Tenants", Key: "4", Active: activeView == ViewModelGroup, Enabled: true},
 		{Name: "P/D Pools", Key: "5", Active: activeView == ViewPDPools, Enabled: true},
-		{Name: "Alerts", Key: "6", Active: false, Enabled: false},
+		{Name: "Alerts", Key: "6", Active: activeView == ViewAlerts, Enabled: true},
 	}
 
 	var parts []string

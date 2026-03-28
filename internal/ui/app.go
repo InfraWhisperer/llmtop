@@ -28,6 +28,8 @@ const (
 	ViewModelGroup
 	ViewKVCache
 	ViewPDPools
+	ViewAlerts
+	ViewOverlay // detail overlay on top of current view
 )
 
 // tickMsg is sent on each refresh interval.
@@ -111,6 +113,19 @@ type Model struct {
 
 	// Previous worker states for event detection
 	prevWorkerStates map[string]workerSnapshot
+
+	// Alert manager
+	alertMgr         *metrics.AlertManager
+	alertSelectedIdx int
+	prevClusterHit   float64
+	prevClusterHitAt time.Time
+
+	// Filter bar state
+	filterText   string
+	filterActive bool
+
+	// Overlay: stash the view to return to
+	overlayReturnView View
 }
 
 var filterCycle = []metrics.Backend{
@@ -146,6 +161,7 @@ func NewModel(c collector.MetricsSource, dc collector.GPUSource, version string,
 		k8sContext:       k8sContext,
 		events:           metrics.NewEventRing(20),
 		prevWorkerStates: make(map[string]workerSnapshot),
+		alertMgr:         metrics.NewAlertManager(),
 	}
 }
 
@@ -217,6 +233,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Generate events by comparing with previous state
 		m.detectEvents()
+		// Evaluate alert rules
+		if m.alertMgr != nil {
+			m.alertMgr.Evaluate(&metrics.AlertState{
+				Workers:        m.workers,
+				GPUs:           m.gpus,
+				Summary:        m.summary,
+				PrevCacheHit:   m.prevClusterHit,
+				PrevCacheHitAt: m.prevClusterHitAt,
+			})
+			m.prevClusterHit = m.summary.AvgCacheHit
+			m.prevClusterHitAt = time.Now()
+		}
 		return m, nil
 
 	case exportDoneMsg:
@@ -301,6 +329,46 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case ViewPDPools:
 		return m.handlePDPoolsKey(msg)
+
+	case ViewAlerts:
+		return m.handleAlertsKey(msg)
+
+	case ViewOverlay:
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return m, tea.Quit
+		case "esc":
+			m.currentView = m.overlayReturnView
+			return m, nil
+		}
+		return m, nil
+	}
+
+	// Filter bar: / key starts filter mode
+	if msg.String() == "/" {
+		m.filterActive = true
+		m.filterText = ""
+		return m, nil
+	}
+
+	// If filter is active, handle text input
+	if m.filterActive {
+		switch msg.String() {
+		case "esc":
+			m.filterActive = false
+			m.filterText = ""
+		case "backspace":
+			if len(m.filterText) > 0 {
+				m.filterText = m.filterText[:len(m.filterText)-1]
+			}
+		case "enter":
+			m.filterActive = false
+		default:
+			if len(msg.String()) == 1 {
+				m.filterText += msg.String()
+			}
+		}
+		return m, nil
 	}
 
 	// Tab shortcuts available from main view
@@ -337,9 +405,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Cycle filter
 		m.filterIdx = (m.filterIdx + 1) % len(filterCycle)
 
-	case "d":
+	case "d", "enter":
 		if len(m.workers) > 0 {
-			m.currentView = ViewDetail
+			m.overlayReturnView = ViewMain
+			m.currentView = ViewOverlay
 		}
 
 	case "r":
@@ -595,6 +664,9 @@ func (m *Model) handleTabSwitch(msg tea.KeyMsg) (bool, tea.Cmd) {
 	case "5":
 		m.currentView = ViewPDPools
 		return true, nil
+	case "6":
+		m.currentView = ViewAlerts
+		return true, nil
 	}
 	return false, nil
 }
@@ -643,6 +715,50 @@ func (m Model) handlePDPoolsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// handleAlertsKey handles keys in the Alerts tab.
+func (m Model) handleAlertsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if handled, cmd := m.handleTabSwitch(msg); handled {
+		return m, cmd
+	}
+	switch msg.String() {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	case "up", "k":
+		if m.alertSelectedIdx > 0 {
+			m.alertSelectedIdx--
+		}
+	case "down", "j":
+		alerts := m.alertMgr.All()
+		if m.alertSelectedIdx < len(alerts)-1 {
+			m.alertSelectedIdx++
+		}
+	case "enter":
+		// Jump to the source worker in Workers tab
+		alerts := m.alertMgr.All()
+		if m.alertSelectedIdx < len(alerts) {
+			a := alerts[m.alertSelectedIdx]
+			for i, w := range m.workers {
+				if w.Label == a.Source || strings.Contains(w.Label, a.Source) {
+					m.selectedIdx = i
+					m.currentView = ViewMain
+					return m, nil
+				}
+			}
+		}
+	case "r":
+		m.collector.PollNow(context.TODO())
+		if m.dcgmCollector != nil {
+			m.dcgmCollector.PollNow(context.TODO())
+		}
+		return m, fetchDataCmd(m.collector, m.dcgmCollector)
+	case "e":
+		return m, exportJSONCmd(m.workers, m.summary, m.gpus, m.gpuSummary)
+	case "?":
+		m.currentView = ViewHelp
+	}
+	return m, nil
+}
+
 // View renders the current application state.
 func (m Model) View() string {
 	if m.width == 0 {
@@ -664,25 +780,42 @@ func (m Model) View() string {
 		return m.renderKVCacheMain()
 	case ViewPDPools:
 		return m.renderPDPoolsMain()
+	case ViewAlerts:
+		return m.renderAlertsMain()
+	case ViewOverlay:
+		return m.renderOverlay()
 	}
 
 	return m.renderMain()
 }
 
-// displayWorkers returns the worker slice to display, applying model drill-down filter.
+// displayWorkers returns the worker slice to display, applying model drill-down and text filters.
 func (m Model) displayWorkers() []*metrics.WorkerMetrics {
-	if m.modelFilter == "" {
-		return m.workers
-	}
 	var display []*metrics.WorkerMetrics
-	for _, w := range m.workers {
-		name := w.ModelName
-		if name == "" {
-			name = "Unknown"
+	if m.modelFilter != "" {
+		for _, w := range m.workers {
+			name := w.ModelName
+			if name == "" {
+				name = "Unknown"
+			}
+			if name == m.modelFilter {
+				display = append(display, w)
+			}
 		}
-		if name == m.modelFilter {
-			display = append(display, w)
+	} else {
+		display = m.workers
+	}
+	if m.filterText != "" {
+		var filtered []*metrics.WorkerMetrics
+		lower := strings.ToLower(m.filterText)
+		for _, w := range display {
+			if strings.Contains(strings.ToLower(w.Label), lower) ||
+				strings.Contains(strings.ToLower(w.ModelName), lower) ||
+				strings.Contains(strings.ToLower(w.Endpoint), lower) {
+				filtered = append(filtered, w)
+			}
 		}
+		return filtered
 	}
 	return display
 }
@@ -838,9 +971,19 @@ func (m Model) renderMain() string {
 	}
 
 	sb.WriteString("\n")
-	sb.WriteString(m.renderFooter())
+	if m.filterActive {
+		sb.WriteString(m.renderFilterBar())
+	} else {
+		sb.WriteString(m.renderFooter())
+	}
 
 	return sb.String()
+}
+
+func (m Model) renderFilterBar() string {
+	cursor := lipgloss.NewStyle().Foreground(colorCyan).Bold(true)
+	prompt := StyleFooterKey.Render("/") + " " + m.filterText + cursor.Render("_")
+	return StyleFooter.Render("  " + prompt)
 }
 
 func (m Model) renderModelMain() string {
@@ -913,6 +1056,35 @@ func (m Model) renderPDPoolsMain() string {
 
 	sb.WriteString(m.renderFooter())
 	return sb.String()
+}
+
+func (m Model) renderAlertsMain() string {
+	var sb strings.Builder
+
+	crit, warn, info := m.alertMgr.Counts()
+	header := RenderAlertsHeader(crit, warn, info, "v"+m.version, m.intervalSec, m.width)
+	sb.WriteString(header)
+	sb.WriteString("\n")
+
+	sb.WriteString(RenderTabBar(ViewAlerts, m.dcgmCollector != nil, m.width))
+	sb.WriteString("\n\n")
+
+	alerts := m.alertMgr.All()
+	sb.WriteString(RenderAlertsList(alerts, m.alertSelectedIdx, m.width))
+
+	lines := strings.Count(sb.String(), "\n")
+	remaining := m.height - lines - 3
+	for i := 0; i < remaining; i++ {
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString(m.renderFooter())
+	return sb.String()
+}
+
+func (m Model) renderOverlay() string {
+	worker := m.selectedWorker()
+	return RenderDetailOverlay(worker, m.gpus, m.width, m.height)
 }
 
 func (m Model) renderFooter() string {

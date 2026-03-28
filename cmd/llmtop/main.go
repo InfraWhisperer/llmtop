@@ -46,8 +46,12 @@ type k8sFlags struct {
 	noK8s         bool
 }
 
-// version is set via -ldflags at build time.
-var version = "0.1.0"
+// Build-time variables set via -ldflags.
+var (
+	version   = "0.1.0"
+	commit    = "dev"
+	buildDate = "unknown"
+)
 
 func main() {
 	if err := rootCmd().Execute(); err != nil {
@@ -104,7 +108,7 @@ func versionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print version information",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("llmtop %s\n", version)
+			fmt.Printf("llmtop %s (commit: %s, built: %s)\n", version, commit, buildDate)
 		},
 	}
 }
