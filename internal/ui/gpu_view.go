@@ -3,20 +3,11 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/InfraWhisperer/llmtop/internal/metrics"
-)
 
-// GPU table column widths
-const (
-	colGPUIdx   = 16
-	colGPUName  = 26
-	colGPUUtil  = 7
-	colGPUVRAM  = 16
-	colGPUTemp  = 7
-	colGPUPower = 8
-	colGPUPod   = 38
+	"github.com/InfraWhisperer/llmtop/internal/metrics"
 )
 
 // GPUSortColumnName returns a human-readable name for the GPU sort column.
@@ -82,84 +73,6 @@ func RenderGPUHeader(summary metrics.GPUSummary, version string, intervalSec int
 		Render(header)
 }
 
-// RenderGPUTable renders the GPU metrics table.
-func RenderGPUTable(gpus []*metrics.GPUInfo, selectedIdx int, width int) string {
-	var sb strings.Builder
-
-	// Header row
-	header := renderGPUTableHeader()
-	sb.WriteString(header)
-	sb.WriteString("\n")
-
-	// Separator
-	sep := StyleTableSeparator.Render(strings.Repeat("─", max(width-2, 80)))
-	sb.WriteString("  " + sep)
-	sb.WriteString("\n")
-
-	// Rows
-	for i, g := range gpus {
-		row := renderGPURow(g, i == selectedIdx)
-		sb.WriteString(row)
-		sb.WriteString("\n")
-	}
-
-	return sb.String()
-}
-
-func renderGPUTableHeader() string {
-	cols := []struct {
-		name  string
-		width int
-	}{
-		{"GPU#", colGPUIdx},
-		{"NAME", colGPUName},
-		{"UTIL%", colGPUUtil},
-		{"VRAM GiB", colGPUVRAM},
-		{"TEMP", colGPUTemp},
-		{"POWER", colGPUPower},
-		{"POD", colGPUPod},
-	}
-
-	var parts []string
-	for _, c := range cols {
-		parts = append(parts, StyleTableHeader.Render(padRight(c.name, c.width)))
-	}
-	return "  " + strings.Join(parts, " ")
-}
-
-func renderGPURow(g *metrics.GPUInfo, selected bool) string {
-	// GPU index with hostname for multi-node disambiguation
-	idxLabel := fmt.Sprintf("%d", g.Index)
-	if g.Hostname != "" {
-		idxLabel = g.Hostname + "/" + idxLabel
-	}
-	idxStr := padRight(truncate(idxLabel, colGPUIdx), colGPUIdx)
-	nameStr := padRight(truncate(g.Name, colGPUName), colGPUName)
-	utilPlain := padRight(fmt.Sprintf("%.0f%%", g.UtilPct), colGPUUtil)
-
-	var vramPct float64
-	if g.MemTotalMB > 0 {
-		vramPct = (g.MemUsedMB / g.MemTotalMB) * 100
-	}
-	vramPlain := padRight(truncate(fmt.Sprintf("%.1f/%.1f GiB", g.MemUsedMB/1024, g.MemTotalMB/1024), colGPUVRAM), colGPUVRAM)
-	tempPlain := padRight(fmt.Sprintf("%.0f°C", g.TempC), colGPUTemp)
-	powerPlain := padRight(fmt.Sprintf("%.0fW", g.PowerW), colGPUPower)
-	podStr := padRight(truncate(gpuPodLabel(g), colGPUPod), colGPUPod)
-
-	if selected {
-		plain := "  " + idxStr + " " + nameStr + " " +
-			utilPlain + " " + vramPlain + " " +
-			tempPlain + " " + powerPlain + " " + podStr
-		return StyleTableRowSelected.Render(plain)
-	}
-
-	return "  " + idxStr + " " + nameStr + " " +
-		GPUUtilStyle(g.UtilPct).Render(utilPlain) + " " +
-		VRAMStyle(vramPct).Render(vramPlain) + " " +
-		GPUTempStyle(g.TempC).Render(tempPlain) + " " +
-		StyleMetricGood.Render(powerPlain) + " " + podStr
-}
-
 func gpuPodLabel(g *metrics.GPUInfo) string {
 	if g.Pod == "" {
 		return "-"
@@ -168,6 +81,163 @@ func gpuPodLabel(g *metrics.GPUInfo) string {
 		return g.Namespace + "/" + g.Pod
 	}
 	return g.Pod
+}
+
+// utilColor returns the lipgloss color for a GPU utilization percentage.
+func utilColor(pct float64) lipgloss.Color {
+	if pct >= 90 {
+		return lipgloss.Color("#FF4444")
+	}
+	if pct >= 70 {
+		return lipgloss.Color("#FFD700")
+	}
+	return lipgloss.Color("#00FF7F")
+}
+
+// scrapeAgeStr formats the DCGM scrape age with color coding.
+// Red with "!" if >30s, amber if >15s, dim if fresh.
+func scrapeAgeStr(lastScrape time.Time) string {
+	if lastScrape.IsZero() {
+		return StyleMetricNA.Render("-")
+	}
+	age := time.Since(lastScrape)
+	label := fmt.Sprintf("%ds", int(age.Seconds()))
+	if age > 30*time.Second {
+		return StyleMetricBad.Render(label + " !")
+	}
+	if age > 15*time.Second {
+		return StyleMetricWarn.Render(label)
+	}
+	return lipgloss.NewStyle().Foreground(colorSubtext).Render(label)
+}
+
+// renderCardMetricRow renders a two-column metric row inside a card.
+// Each column is label + value, separated by whitespace to fill cardInner width.
+func renderCardMetricRow(leftLabel, leftVal, rightLabel, rightVal string, innerWidth int) string {
+	colWidth := innerWidth / 2
+	left := padRight(leftLabel, 8) + padRight(leftVal, colWidth-8)
+	right := padRight(rightLabel, 8) + padRight(rightVal, colWidth-8)
+	row := left + right
+	if len(row) > innerWidth {
+		row = row[:innerWidth]
+	}
+	return padRight(row, innerWidth)
+}
+
+// renderSingleMetricRow renders a single-column metric row inside a card.
+func renderSingleMetricRow(label, value string, innerWidth int) string {
+	row := padRight(label, 8) + value
+	return padRight(truncate(row, innerWidth), innerWidth)
+}
+
+// renderGPUCard renders a single GPU card with border and metrics.
+func renderGPUGridCard(g *metrics.GPUInfo, selected bool, cardWidth int) string {
+	borderColor := lipgloss.Color("#21262d")
+	if selected {
+		borderColor = lipgloss.Color("#58a6ff")
+	}
+
+	// Inner width accounts for border padding (1 char each side from lipgloss border)
+	innerWidth := cardWidth - 4
+	if innerWidth < 20 {
+		innerWidth = 20
+	}
+
+	// Title line: "GPU N" left, util% right
+	gpuLabel := fmt.Sprintf("GPU %d", g.Index)
+	utilPctStr := fmt.Sprintf("%.0f%%", g.UtilPct)
+	utilStyle := lipgloss.NewStyle().Foreground(utilColor(g.UtilPct)).Bold(true)
+
+	titlePadding := innerWidth - len(gpuLabel) - len(utilPctStr)
+	if titlePadding < 1 {
+		titlePadding = 1
+	}
+	titleLine := lipgloss.NewStyle().Bold(true).Foreground(colorWhite).Render(gpuLabel) +
+		strings.Repeat(" ", titlePadding) +
+		utilStyle.Render(utilPctStr)
+
+	// Utilization bar
+	barWidth := innerWidth
+	utilBar := RenderKVBar(g.UtilPct, barWidth)
+
+	// Memory bandwidth
+	memBWVal := fmt.Sprintf("%.0f%%", g.MemBWUtil)
+
+	// Temperature
+	tempVal := GPUTempStyle(g.TempC).Render(fmt.Sprintf("%.0f°C", g.TempC))
+
+	// Power
+	powerVal := fmt.Sprintf("%.0fW", g.PowerW)
+
+	// NVLink
+	nvlinkVal := fmt.Sprintf("%.0f GB/s", g.NVLinkGBs)
+
+	// ECC
+	eccVal := fmt.Sprintf("%d", g.ECCErrors)
+	if g.ECCErrors > 0 {
+		eccVal = StyleMetricBad.Render(eccVal)
+	}
+
+	// VRAM
+	var vramPct float64
+	if g.MemTotalMB > 0 {
+		vramPct = (g.MemUsedMB / g.MemTotalMB) * 100
+	}
+	vramStr := fmt.Sprintf("%.0f/%.0f GB", g.MemUsedMB/1024, g.MemTotalMB/1024)
+	vramVal := VRAMStyle(vramPct).Render(vramStr)
+
+	// Process / pod
+	procName := "-"
+	if g.Pod != "" {
+		procName = g.Pod
+	}
+	procVal := truncate(procName, innerWidth-8)
+
+	// Scrape age
+	ageVal := scrapeAgeStr(g.LastScrape)
+
+	// Build card content lines
+	var lines []string
+	lines = append(lines, titleLine)
+	lines = append(lines, utilBar)
+	lines = append(lines, renderCardMetricRow("Mem BW", memBWVal, "Temp", tempVal, innerWidth))
+	lines = append(lines, renderCardMetricRow("Power", powerVal, "NVLink", nvlinkVal, innerWidth))
+	lines = append(lines, renderCardMetricRow("ECC", eccVal, "VRAM", vramVal, innerWidth))
+	lines = append(lines, renderSingleMetricRow("Proc", procVal, innerWidth))
+	lines = append(lines, renderSingleMetricRow("Age", ageVal, innerWidth))
+
+	content := strings.Join(lines, "\n")
+
+	cardStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Width(innerWidth).
+		Padding(0, 1)
+
+	return cardStyle.Render(content)
+}
+
+// RenderGPUCards renders a 2-column grid of GPU cards.
+func RenderGPUCards(gpus []*metrics.GPUInfo, selectedIdx int, width int) string {
+	cardWidth := (width - 6) / 2
+	if cardWidth < 30 {
+		cardWidth = 30
+	}
+
+	var rows []string
+	for i := 0; i < len(gpus); i += 2 {
+		left := renderGPUGridCard(gpus[i], i == selectedIdx, cardWidth)
+
+		if i+1 < len(gpus) {
+			right := renderGPUGridCard(gpus[i+1], i+1 == selectedIdx, cardWidth)
+			row := lipgloss.JoinHorizontal(lipgloss.Top, left, "  ", right)
+			rows = append(rows, row)
+		} else {
+			rows = append(rows, left)
+		}
+	}
+
+	return strings.Join(rows, "\n")
 }
 
 func (m Model) renderGPUMain() string {
@@ -190,9 +260,9 @@ func (m Model) renderGPUMain() string {
 
 	sb.WriteString("\n")
 
-	// Table
-	table := RenderGPUTable(m.gpus, m.gpuSelectedIdx, m.width)
-	sb.WriteString(table)
+	// Card grid
+	cards := RenderGPUCards(m.gpus, m.gpuSelectedIdx, m.width)
+	sb.WriteString(cards)
 
 	// Fill remaining space
 	lines := strings.Count(sb.String(), "\n")

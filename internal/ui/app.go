@@ -26,6 +26,8 @@ const (
 	ViewGPU
 	ViewGPUDetail
 	ViewModelGroup
+	ViewKVCache
+	ViewPDPools
 )
 
 // tickMsg is sent on each refresh interval.
@@ -293,21 +295,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case ViewModelGroup:
 		return m.handleModelGroupKey(msg)
+
+	case ViewKVCache:
+		return m.handleKVCacheKey(msg)
+
+	case ViewPDPools:
+		return m.handlePDPoolsKey(msg)
 	}
 
 	// Tab shortcuts available from main view
-	switch msg.String() {
-	case "1":
-		// Already on workers view
-		return m, nil
-	case "2":
-		if m.dcgmCollector != nil {
-			m.currentView = ViewGPU
-		}
-		return m, nil
-	case "4":
-		m.currentView = ViewModelGroup
-		return m, nil
+	if handled, cmd := m.handleTabSwitch(msg); handled {
+		return m, cmd
 	}
 
 	// Main view
@@ -376,18 +374,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleModelGroupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if handled, cmd := m.handleTabSwitch(msg); handled {
+		return m, cmd
+	}
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
-
-	case "1":
-		m.currentView = ViewMain
-	case "2":
-		if m.dcgmCollector != nil {
-			m.currentView = ViewGPU
-		}
-	case "4":
-		// Already on model/tenants view
 
 	case "m":
 		m.currentView = ViewMain
@@ -459,26 +451,34 @@ func (m *Model) sortModelGroups() {
 }
 
 func (m Model) handleGPUKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if handled, cmd := m.handleTabSwitch(msg); handled {
+		return m, cmd
+	}
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
-
-	case "1":
-		m.currentView = ViewMain
-	case "2":
-		// Already on GPU view
-	case "4":
-		m.currentView = ViewModelGroup
 
 	case "g":
 		m.currentView = ViewMain
 
 	case "up", "k":
+		// Move up one row in 2-column grid
+		if m.gpuSelectedIdx-2 >= 0 {
+			m.gpuSelectedIdx -= 2
+		}
+
+	case "down", "j":
+		// Move down one row in 2-column grid
+		if m.gpuSelectedIdx+2 < len(m.gpus) {
+			m.gpuSelectedIdx += 2
+		}
+
+	case "left", "h":
 		if m.gpuSelectedIdx > 0 {
 			m.gpuSelectedIdx--
 		}
 
-	case "down", "j":
+	case "right", "l":
 		if m.gpuSelectedIdx < len(m.gpus)-1 {
 			m.gpuSelectedIdx++
 		}
@@ -497,6 +497,21 @@ func (m Model) handleGPUKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "d":
 		if len(m.gpus) > 0 {
 			m.currentView = ViewGPUDetail
+		}
+
+	case "enter":
+		// Jump to the worker running on this GPU
+		if m.gpuSelectedIdx < len(m.gpus) {
+			gpu := m.gpus[m.gpuSelectedIdx]
+			if gpu.Pod != "" {
+				for i, w := range m.workers {
+					if strings.Contains(w.Label, gpu.Pod) || strings.Contains(w.Endpoint, gpu.Pod) {
+						m.selectedIdx = i
+						m.currentView = ViewMain
+						return m, nil
+					}
+				}
+			}
 		}
 
 	case "r":
@@ -559,6 +574,75 @@ func (m *Model) sortWorkers() {
 	})
 }
 
+// handleTabSwitch handles number-key tab switching from any primary view.
+// Returns (true, cmd) if the key was a tab switch, (false, nil) otherwise.
+func (m *Model) handleTabSwitch(msg tea.KeyMsg) (bool, tea.Cmd) {
+	switch msg.String() {
+	case "1":
+		m.currentView = ViewMain
+		return true, nil
+	case "2":
+		if m.dcgmCollector != nil {
+			m.currentView = ViewGPU
+		}
+		return true, nil
+	case "3":
+		m.currentView = ViewKVCache
+		return true, nil
+	case "4":
+		m.currentView = ViewModelGroup
+		return true, nil
+	case "5":
+		m.currentView = ViewPDPools
+		return true, nil
+	}
+	return false, nil
+}
+
+// handleKVCacheKey handles keys in the KV Cache tab.
+func (m Model) handleKVCacheKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if handled, cmd := m.handleTabSwitch(msg); handled {
+		return m, cmd
+	}
+	switch msg.String() {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	case "r":
+		m.collector.PollNow(context.TODO())
+		if m.dcgmCollector != nil {
+			m.dcgmCollector.PollNow(context.TODO())
+		}
+		return m, fetchDataCmd(m.collector, m.dcgmCollector)
+	case "e":
+		return m, exportJSONCmd(m.workers, m.summary, m.gpus, m.gpuSummary)
+	case "?":
+		m.currentView = ViewHelp
+	}
+	return m, nil
+}
+
+// handlePDPoolsKey handles keys in the P/D Pools tab.
+func (m Model) handlePDPoolsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if handled, cmd := m.handleTabSwitch(msg); handled {
+		return m, cmd
+	}
+	switch msg.String() {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	case "r":
+		m.collector.PollNow(context.TODO())
+		if m.dcgmCollector != nil {
+			m.dcgmCollector.PollNow(context.TODO())
+		}
+		return m, fetchDataCmd(m.collector, m.dcgmCollector)
+	case "e":
+		return m, exportJSONCmd(m.workers, m.summary, m.gpus, m.gpuSummary)
+	case "?":
+		m.currentView = ViewHelp
+	}
+	return m, nil
+}
+
 // View renders the current application state.
 func (m Model) View() string {
 	if m.width == 0 {
@@ -576,6 +660,10 @@ func (m Model) View() string {
 		return m.renderGPUDetail()
 	case ViewModelGroup:
 		return m.renderModelMain()
+	case ViewKVCache:
+		return m.renderKVCacheMain()
+	case ViewPDPools:
+		return m.renderPDPoolsMain()
 	}
 
 	return m.renderMain()
@@ -759,25 +847,16 @@ func (m Model) renderModelMain() string {
 	var sb strings.Builder
 
 	// Header
-	header := RenderModelHeader(m.modelGroups, "v"+m.version, m.intervalSec, m.width)
+	header := RenderHeader(m.summary, "v"+m.version, m.intervalSec, m.width)
 	sb.WriteString(header)
 	sb.WriteString("\n")
 
 	// Tab bar
 	sb.WriteString(RenderTabBar(ViewModelGroup, m.dcgmCollector != nil, m.width))
-	sb.WriteString("\n")
+	sb.WriteString("\n\n")
 
-	// Sort indicator
-	if m.modelSortCol != ModelSortNone {
-		sortLine := StyleHeaderStat.Render("  Sort: ") + StyleSortIndicator.Render(ModelSortColumnName(m.modelSortCol)+" ↓")
-		sb.WriteString(sortLine + "\n")
-	}
-
-	sb.WriteString("\n")
-
-	// Table
-	table := RenderModelTable(m.modelGroups, m.modelSelectedIdx, m.modelSortCol, m.width)
-	sb.WriteString(table)
+	// Tenant card view
+	sb.WriteString(RenderTenantsView(m.modelGroups, m.width))
 
 	// Fill remaining space
 	lines := strings.Count(sb.String(), "\n")
@@ -789,6 +868,50 @@ func (m Model) renderModelMain() string {
 	// Footer
 	sb.WriteString(m.renderFooter())
 
+	return sb.String()
+}
+
+func (m Model) renderKVCacheMain() string {
+	var sb strings.Builder
+
+	header := RenderHeader(m.summary, "v"+m.version, m.intervalSec, m.width)
+	sb.WriteString(header)
+	sb.WriteString("\n")
+
+	sb.WriteString(RenderTabBar(ViewKVCache, m.dcgmCollector != nil, m.width))
+	sb.WriteString("\n\n")
+
+	sb.WriteString(RenderKVCacheView(m.workers, m.width))
+
+	lines := strings.Count(sb.String(), "\n")
+	remaining := m.height - lines - 3
+	for i := 0; i < remaining; i++ {
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString(m.renderFooter())
+	return sb.String()
+}
+
+func (m Model) renderPDPoolsMain() string {
+	var sb strings.Builder
+
+	header := RenderHeader(m.summary, "v"+m.version, m.intervalSec, m.width)
+	sb.WriteString(header)
+	sb.WriteString("\n")
+
+	sb.WriteString(RenderTabBar(ViewPDPools, m.dcgmCollector != nil, m.width))
+	sb.WriteString("\n\n")
+
+	sb.WriteString(RenderPDPoolsView(m.workers, m.width))
+
+	lines := strings.Count(sb.String(), "\n")
+	remaining := m.height - lines - 3
+	for i := 0; i < remaining; i++ {
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString(m.renderFooter())
 	return sb.String()
 }
 

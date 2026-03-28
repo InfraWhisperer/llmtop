@@ -17,12 +17,12 @@ type Tab struct {
 
 var (
 	styleTabActive = lipgloss.NewStyle().
-			Foreground(colorWhite).
+			Foreground(lipgloss.Color("#58a6ff")).
 			Bold(true).
 			Underline(true)
 
 	styleTabInactive = lipgloss.NewStyle().
-				Foreground(colorSubtext)
+				Foreground(lipgloss.Color("#8b949e"))
 
 	styleTabDisabled = lipgloss.NewStyle().
 				Foreground(colorSurface)
@@ -33,9 +33,9 @@ func RenderTabBar(activeView View, hasGPU bool, width int) string {
 	tabs := []Tab{
 		{Name: "Workers", Key: "1", Active: activeView == ViewMain, Enabled: true},
 		{Name: "GPU", Key: "2", Active: activeView == ViewGPU || activeView == ViewGPUDetail, Enabled: hasGPU},
-		{Name: "KV Cache", Key: "3", Active: false, Enabled: false},
+		{Name: "KV Cache", Key: "3", Active: activeView == ViewKVCache, Enabled: true},
 		{Name: "Tenants", Key: "4", Active: activeView == ViewModelGroup, Enabled: true},
-		{Name: "P/D Pools", Key: "5", Active: false, Enabled: false},
+		{Name: "P/D Pools", Key: "5", Active: activeView == ViewPDPools, Enabled: true},
 		{Name: "Alerts", Key: "6", Active: false, Enabled: false},
 	}
 
