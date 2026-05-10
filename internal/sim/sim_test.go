@@ -328,3 +328,136 @@ func TestReproducibleWithSeed(t *testing.T) {
 func urlFor(port int, path string) string {
 	return fmt.Sprintf("http://localhost:%d%s", port, path)
 }
+
+func TestSwitchScenario_ResetsSimTime(t *testing.T) {
+	cfg := testConfig()
+	cfg.Scenario = "demo"
+	s := New(cfg)
+
+	// Advance into the demo's KV-pressure window.
+	s.AdvanceTo(20 * time.Second)
+	s.mu.RLock()
+	if s.simTime < 20 {
+		s.mu.RUnlock()
+		t.Fatalf("expected simTime >= 20, got %v", s.simTime)
+	}
+	s.mu.RUnlock()
+
+	s.SwitchScenario("steady")
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.simTime != 0 {
+		t.Errorf("after SwitchScenario simTime = %v, want 0", s.simTime)
+	}
+	if s.scenario.Name != "steady" {
+		t.Errorf("scenario.Name = %q, want \"steady\"", s.scenario.Name)
+	}
+}
+
+func TestSwitchScenario_ResetsWorkersToBaseline(t *testing.T) {
+	cfg := testConfig()
+	cfg.Scenario = "demo"
+	s := New(cfg)
+	s.AdvanceTo(25 * time.Second)
+
+	s.mu.RLock()
+	gamma := s.workers["sim-prefill-gamma"]
+	preKV := gamma.KVPercGPU
+	s.mu.RUnlock()
+	if preKV < 0.50 {
+		t.Fatalf("demo at t=25 should have elevated KV on gamma, got %v", preKV)
+	}
+
+	s.SwitchScenario("steady")
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	postKV := s.workers["sim-prefill-gamma"].KVPercGPU
+	if postKV >= preKV {
+		t.Errorf("expected KV to drop after switch to steady, pre=%v post=%v", preKV, postKV)
+	}
+}
+
+func TestSwitchScenario_PreservesErrorWorkerOffline(t *testing.T) {
+	cfg := testConfig()
+	cfg.Scenario = "demo"
+	s := New(cfg)
+	s.SwitchScenario("steady")
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	errW := s.workers["sim-benchmark-runner"]
+	if errW == nil {
+		t.Fatal("benchmark runner missing")
+	}
+	if errW.Online {
+		t.Error("benchmark runner should remain offline after SwitchScenario")
+	}
+}
+
+func TestSwitchScenario_UnknownFallsBackToSteady(t *testing.T) {
+	cfg := testConfig()
+	s := New(cfg)
+	s.SwitchScenario("nonexistent")
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.scenario.Name != "steady" {
+		t.Errorf("unknown scenario should fall back to steady, got %q", s.scenario.Name)
+	}
+}
+
+func TestSwitchScenario_ConcurrentWithTick(t *testing.T) {
+	cfg := testConfig()
+	s := New(cfg)
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 100; i++ {
+			s.Tick(0.5)
+		}
+		close(done)
+	}()
+	for i := 0; i < 20; i++ {
+		s.SwitchScenario("steady")
+	}
+	<-done
+}
+
+func TestRenderWorkerMetrics_NVMeGaugeEmittedWhenNonzero(t *testing.T) {
+	w := &WorkerState{Name: "w", Role: "prefill", ModelName: "m", Online: true, KVPercNVMe: 0.12}
+	InitWorker(w, 1)
+	w.KVPercNVMe = 0.12 // restore after Init zeroed it
+	out := RenderWorkerMetrics(w)
+	if !strings.Contains(out, "vllm:nvme_cache_usage_perc") {
+		t.Errorf("expected NVMe gauge present when KVPercNVMe>0:\n%s", out)
+	}
+}
+
+func TestRenderWorkerMetrics_NVMeGaugeAbsentWhenZero(t *testing.T) {
+	w := &WorkerState{Name: "w", Role: "prefill", ModelName: "m", Online: true}
+	InitWorker(w, 1)
+	w.KVPercNVMe = 0
+	out := RenderWorkerMetrics(w)
+	if strings.Contains(out, "vllm:nvme_cache_usage_perc") {
+		t.Errorf("expected no NVMe gauge when KVPercNVMe==0:\n%s", out)
+	}
+}
+
+func TestRenderWorkerMetrics_KVTransferHistogram_PrefillOnly(t *testing.T) {
+	prefill := &WorkerState{Name: "p", Role: "prefill", ModelName: "m", Online: true}
+	InitWorker(prefill, 1)
+	prefill.RequestsTotal = 100
+	prefill.TTFTp99Ms = 1000
+	out := RenderWorkerMetrics(prefill)
+	if !strings.Contains(out, "vllm:kv_cache_offload_time_seconds_bucket") {
+		t.Errorf("expected histogram buckets for prefill:\n%s", out)
+	}
+
+	decode := &WorkerState{Name: "d", Role: "decode", ModelName: "m", Online: true}
+	InitWorker(decode, 1)
+	decode.RequestsTotal = 100
+	decode.TTFTp99Ms = 1000
+	out2 := RenderWorkerMetrics(decode)
+	if strings.Contains(out2, "vllm:kv_cache_offload_time_seconds") {
+		t.Errorf("expected no KV transfer histogram for decode:\n%s", out2)
+	}
+}

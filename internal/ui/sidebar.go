@@ -47,7 +47,11 @@ var (
 )
 
 // RenderSidebar renders the full sidebar content for the selected worker.
-func RenderSidebar(worker *metrics.WorkerMetrics, gpus []*metrics.GPUInfo, events []metrics.Event, height int) string {
+//
+// anomaly (V3) is the optional anomaly source. When non-nil and the worker
+// has metrics flagged anomalous (|sigma| >= 2), an "ANOMALIES" sub-block
+// is appended to the KV tier section listing up to 3 metrics by sigma desc.
+func RenderSidebar(worker *metrics.WorkerMetrics, gpus []*metrics.GPUInfo, events []metrics.Event, height int, anomaly AnomalyGetter) string {
 	if worker == nil {
 		return styleSidebarBorder.Height(height).Render("")
 	}
@@ -61,12 +65,60 @@ func RenderSidebar(worker *metrics.WorkerMetrics, gpus []*metrics.GPUInfo, event
 	// Section B: KV tier breakdown
 	sections = append(sections, renderKVTierSection(worker, contentWidth))
 
+	// Section B': V3 anomalies (optional)
+	if anomaly != nil {
+		if block := renderAnomalySection(worker, anomaly, contentWidth); block != "" {
+			sections = append(sections, block)
+		}
+	}
+
 	// Section C: Event stream
 	sections = append(sections, renderEventSection(events, contentWidth, height))
 
 	content := strings.Join(sections, "\n")
 
 	return styleSidebarBorder.Height(height).Render(content)
+}
+
+// renderAnomalySection renders the V3 ANOMALIES sub-block. Returns ""
+// when the worker has no metric at |sigma| >= 2.
+func renderAnomalySection(worker *metrics.WorkerMetrics, anomaly AnomalyGetter, width int) string {
+	details := anomaly.Anomalies(worker.Endpoint, worker)
+	if len(details) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString(styleSidebarHeader.Render("ANOMALIES"))
+	sb.WriteString("\n")
+	limit := 3
+	if len(details) < limit {
+		limit = len(details)
+	}
+	for i := 0; i < limit; i++ {
+		d := details[i]
+		sign := "+"
+		if d.Sigma < 0 {
+			sign = "-"
+		}
+		abs := d.Sigma
+		if abs < 0 {
+			abs = -abs
+		}
+		line := fmt.Sprintf("%s %s%.1fσ (μ=%.1f σ=%.1f)", d.MetricName, sign, abs, d.Mean, d.Stddev)
+		var styled string
+		switch {
+		case abs > 3:
+			styled = StyleMetricBad.Render(line)
+		case abs > 2:
+			styled = StyleMetricWarn.Render(line)
+		default:
+			styled = StyleMetricNA.Render(line)
+		}
+		sb.WriteString(truncate(styled, width))
+		sb.WriteString("\n")
+	}
+	sb.WriteString(sidebarRule(width))
+	return sb.String()
 }
 
 func sidebarRule(width int) string {
@@ -224,7 +276,12 @@ func renderKVTierSection(worker *metrics.WorkerMetrics, width int) string {
 		sb.WriteString(renderTierRow("CPU DRAM", worker.KVCacheUsageCPUPct, barWidth, width))
 	}
 
-	// Below tiers: hit rate, evict/s, prestage lat
+	// F1: NVMe SSD tier — only when this worker reports NVMe usage.
+	if worker.KVCacheUsageNVMePct > 0 {
+		sb.WriteString(renderTierRow("NVMe SSD", worker.KVCacheUsageNVMePct, barWidth, width))
+	}
+
+	// Below tiers: hit rate, evict/s, KV xfer p99
 	sb.WriteString(sidebarMetricRow("Hit rate", formatPctOrDash(worker.CacheHitRatePct), width))
 
 	if worker.EvictPerSec > 0 {
@@ -233,11 +290,12 @@ func renderKVTierSection(worker *metrics.WorkerMetrics, width int) string {
 		sb.WriteString(sidebarMetricRow("Evict/s", "-", width))
 	}
 
-	// Prestage latency: use TTFT p50 as proxy
-	if worker.TTFT_P50 > 0 {
-		sb.WriteString(sidebarMetricRow("Prestage lat", fmt.Sprintf("%.1fms", worker.TTFT_P50), width))
+	// F6: real KV block transfer P99 (prefill workers only). Replaces the
+	// old TTFT_P50 proxy; non-prefill or missing histogram → "—".
+	if worker.KVTransferP99Ms > 0 {
+		sb.WriteString(sidebarMetricRow("KV xfer p99", fmt.Sprintf("%.0fms", worker.KVTransferP99Ms), width))
 	} else {
-		sb.WriteString(sidebarMetricRow("Prestage lat", "-", width))
+		sb.WriteString(sidebarMetricRow("KV xfer p99", "—", width))
 	}
 
 	sb.WriteString(sidebarRule(width))

@@ -51,24 +51,12 @@ func parseTGIMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, prev
 		m.RequestsRunning = int(v)
 	}
 
-	// TTFT approximation: use prefill forward duration as the closest proxy.
-	// TGI doesn't expose a per-request TTFT histogram, but the prefill batch
-	// forward duration captures the model execution time for the first token.
-	if p50, ok := pm.GetHistogramQuantileAny("tgi_request_inference_duration", 0.50); ok {
-		m.TTFT_P50 = p50 * 1000
-	}
-	if p99, ok := pm.GetHistogramQuantileAny("tgi_request_inference_duration", 0.99); ok {
-		m.TTFT_P99 = p99 * 1000
-	}
-
-	// Inter-token latency: tgi_request_mean_time_per_token_duration is a histogram
-	// of per-request average TPOT (time per output token) in seconds.
-	if p50, ok := pm.GetHistogramQuantileAny("tgi_request_mean_time_per_token_duration", 0.50); ok {
-		m.ITL_P50 = p50 * 1000
-	}
-	if p99, ok := pm.GetHistogramQuantileAny("tgi_request_mean_time_per_token_duration", 0.99); ok {
-		m.ITL_P99 = p99 * 1000
-	}
+	// TTFT approximation uses request inference duration; ITL uses TPOT histogram.
+	// Populate the scalar and LatencySnapshot fields together.
+	populateLatency(m, pm,
+		"tgi_request_inference_duration",
+		[]string{"tgi_request_mean_time_per_token_duration"},
+	)
 
 	// Token throughput: tgi_request_generated_tokens is a histogram whose _sum
 	// tracks total generated tokens. We compute rate from the counter.

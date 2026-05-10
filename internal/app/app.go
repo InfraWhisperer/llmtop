@@ -21,15 +21,23 @@ import (
 
 // Options holds the resolved configuration for an App instance.
 type Options struct {
-	WorkerConfigs  []collector.WorkerConfig
-	Interval       time.Duration
-	DCGMEndpoint   string
-	DCGMFetchFuncs []func(ctx context.Context) (string, error)
-	K8sContext     string
-	Discoverer     *discovery.KubernetesDiscoverer // nil if no K8s
-	Once           bool
-	OutputFormat   string
-	Version        string
+	WorkerConfigs    []collector.WorkerConfig
+	Interval         time.Duration
+	DCGMEndpoint     string
+	DCGMFetchFuncs   []func(ctx context.Context) (string, error)
+	K8sContext       string
+	Discoverer       *discovery.KubernetesDiscoverer // nil if no K8s
+	Once             bool
+	OutputFormat     string
+	Version          string
+	AlertThresholds  metrics.AlertThresholds
+	AlertsCustomized bool
+
+	// V12: --demo flag wires DemoMode=true and a ScenarioSwitcher closure
+	// that calls into the in-process simulator. ScenarioSwitcher is nil when
+	// not in demo mode; the TUI's S key handler must guard against nil.
+	DemoMode         bool
+	ScenarioSwitcher func(name string)
 }
 
 // App owns the llmtop application lifecycle.
@@ -138,7 +146,14 @@ func (a *App) runTUI(ctx context.Context) error {
 		go reconcileLoop(ctx, a.opts.Discoverer, a.collector, 15*time.Second)
 	}
 
-	model := ui.NewModel(a.collector, a.gpu, a.opts.Version, intervalSec, a.opts.K8sContext)
+	thresholds := a.opts.AlertThresholds
+	if thresholds == (metrics.AlertThresholds{}) {
+		thresholds = metrics.DefaultAlertThresholds()
+	}
+	// V12 seam: forward DemoMode and ScenarioSwitcher to ui.NewModel. When
+	// --demo is set, ScenarioSwitcher is the closure that calls into
+	// sim.Simulator.SwitchScenario; nil otherwise.
+	model := ui.NewModel(a.collector, a.gpu, a.opts.Version, intervalSec, a.opts.K8sContext, thresholds, a.opts.DemoMode, a.opts.ScenarioSwitcher)
 	p := tea.NewProgram(
 		model,
 		tea.WithAltScreen(),
@@ -223,8 +238,8 @@ func printTable(workers []*metrics.WorkerMetrics, summary metrics.FleetSummary, 
 		summary.TotalTokPerSec, summary.AvgCacheHit, summary.P99TTFT)
 
 	w := tabwriter.NewWriter(os.Stdout, 2, 2, 2, ' ', 0)
-	_, _ = fmt.Fprintln(w, "ROLE\tENDPOINT\tBACKEND\tMODEL\tKV%\tQUEUE\tRUN\tTTFT P99\tITL P99\tHIT%\tTOK/S")
-	_, _ = fmt.Fprintln(w, strings.Repeat("\u2500", 100))
+	_, _ = fmt.Fprintln(w, "ROLE\tENDPOINT\tBACKEND\tNODE\tMODEL\tKV%\tQUEUE\tRUN\tTTFT P99\tITL P99\tXFER P99\tHIT%\tTOK/S")
+	_, _ = fmt.Fprintln(w, strings.Repeat("\u2500", 120))
 	for _, worker := range workers {
 		status := "\u25cf"
 		if !worker.Online {
@@ -250,18 +265,43 @@ func printTable(workers []*metrics.WorkerMetrics, summary metrics.FleetSummary, 
 		if role == "" {
 			role = "mono"
 		}
-		_, _ = fmt.Fprintf(w, "%s\t%s %s\t%s\t%s\t%.0f%%\t%d\t%d\t%.0fms\t%.0fms\t%.0f%%\t%.0f\n",
+		node := truncateField(worker.NodeName, 15)
+		if node == "" {
+			node = "\u2014"
+		}
+		xfer := "\u2014"
+		if worker.KVTransferP99Ms > 0 {
+			xfer = fmt.Sprintf("%.0fms", worker.KVTransferP99Ms)
+		}
+		_, _ = fmt.Fprintf(w, "%s\t%s %s\t%s\t%s\t%s\t%.0f%%\t%d\t%d\t%.0fms\t%.0fms\t%s\t%.0f%%\t%.0f\n",
 			role, status, ep,
 			string(worker.Backend),
+			node,
 			model,
 			worker.KVCacheUsagePct,
 			worker.RequestsWaiting,
 			worker.RequestsRunning,
 			worker.TTFT_P99,
 			worker.ITL_P99,
+			xfer,
 			worker.CacheHitRatePct,
 			worker.GenTokPerSec+worker.PromptTokPerSec,
 		)
 	}
 	_ = w.Flush()
+}
+
+// truncateField clips a string to at most n runes, appending an ellipsis when truncated.
+func truncateField(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	if n <= 1 {
+		return string(r[:n])
+	}
+	return string(r[:n-1]) + "\u2026"
 }

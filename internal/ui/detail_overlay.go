@@ -69,16 +69,26 @@ func RenderDetailOverlay(w *metrics.WorkerMetrics, gpus []*metrics.GPUInfo, widt
 	// Metrics section
 	sb.WriteString(StyleDetailSection.Render("Metrics (live)"))
 	sb.WriteString("\n")
-	sb.WriteString(overlayMetricLine(
-		"KV GPU", fmt.Sprintf("%.0f%%", w.KVCacheUsagePct),
-		"KV CPU", fmt.Sprintf("%.0f%%", w.KVCacheUsageCPUPct),
-		innerWidth,
-	))
-	sb.WriteString(overlayMetricLine(
-		"TTFT p99", fmt.Sprintf("%.0fms", w.TTFT_P99),
-		"ITL p99", fmt.Sprintf("%.0fms", w.ITL_P99),
-		innerWidth,
-	))
+
+	// F1: KV CPU + KV NVMe rendered side-by-side when NVMe is present.
+	if w.KVCacheUsageNVMePct > 0 {
+		sb.WriteString(overlayMetricLine(
+			"KV GPU", fmt.Sprintf("%.0f%%", w.KVCacheUsagePct),
+			"KV CPU", fmt.Sprintf("%.0f%%", w.KVCacheUsageCPUPct),
+			innerWidth,
+		))
+		sb.WriteString(overlayMetricLine(
+			"KV NVMe", fmt.Sprintf("%.0f%%", w.KVCacheUsageNVMePct),
+			"", "",
+			innerWidth,
+		))
+	} else {
+		sb.WriteString(overlayMetricLine(
+			"KV GPU", fmt.Sprintf("%.0f%%", w.KVCacheUsagePct),
+			"KV CPU", fmt.Sprintf("%.0f%%", w.KVCacheUsageCPUPct),
+			innerWidth,
+		))
+	}
 	sb.WriteString(overlayMetricLine(
 		"Tok/s", fmt.Sprintf("%.0f", w.PromptTokPerSec+w.GenTokPerSec),
 		"Queue", fmt.Sprintf("%d", w.RequestsWaiting),
@@ -89,6 +99,13 @@ func RenderDetailOverlay(w *metrics.WorkerMetrics, gpus []*metrics.GPUInfo, widt
 		"Evict/s", fmt.Sprintf("%.0f", w.EvictPerSec),
 		innerWidth,
 	))
+	sb.WriteString("\n")
+
+	// F2: Latency block — P50/P95/P99 + 10-char CDF sparkline per metric.
+	sb.WriteString(StyleDetailSection.Render("Latency"))
+	sb.WriteString("\n")
+	sb.WriteString(renderLatencyBlock("TTFT", w.TTFT, innerWidth))
+	sb.WriteString(renderLatencyBlock("ITL ", w.ITL, innerWidth))
 	sb.WriteString("\n")
 
 	// GPU section
@@ -131,6 +148,77 @@ func RenderDetailOverlay(w *metrics.WorkerMetrics, gpus []*metrics.GPUInfo, widt
 func overlayRow(label, value string, width int) string {
 	return "  " + StyleDetailLabel.Render(fmt.Sprintf("%-14s", label)) +
 		StyleDetailValue.Render(value) + "\n"
+}
+
+// cdfBlocks is the 8-step bar set used by both the legacy sparkline and the
+// F2 CDF sparkline. The CDF mapping is monotonic so only the rising face of
+// the bar is meaningful.
+var cdfBlocks = []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
+
+// renderCDFSparkline renders a 10-character bar visualization of the CDF
+// fractions. Each fraction in [0,1] maps to one of 8 block heights; an
+// all-zero array (data unavailable) produces 10 baseline bars.
+func renderCDFSparkline(cdf [10]float64) string {
+	var sb strings.Builder
+	for _, f := range cdf {
+		if f < 0 {
+			f = 0
+		}
+		if f > 1 {
+			f = 1
+		}
+		idx := int(f * float64(len(cdfBlocks)-1))
+		if idx < 0 {
+			idx = 0
+		}
+		if idx >= len(cdfBlocks) {
+			idx = len(cdfBlocks) - 1
+		}
+		sb.WriteRune(cdfBlocks[idx])
+	}
+	return StyleMetricGood.Render(sb.String())
+}
+
+// formatLatencyMs returns "<n>ms" for a positive value or "—" for zero, matching
+// the spec's all-zero invariant for absent quantiles.
+func formatLatencyMs(ms float64) string {
+	if ms <= 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%.0fms", ms)
+}
+
+// renderLatencyBlock renders one metric's three-quantile line plus its CDF
+// sparkline beneath. When P99 is zero, the values render as "—" and the
+// sparkline row is suppressed (per spec edge case 6 + invariant).
+//
+// The label column is fixed at 6 chars to keep TTFT and ITL aligned. Caller
+// passes "TTFT" or "ITL " (trailing space) so the visual register matches.
+//
+// When innerWidth < 80, the sparkline row is omitted to avoid wrapping.
+func renderLatencyBlock(label string, ls metrics.LatencySnapshot, innerWidth int) string {
+	labelStyle := StyleDetailLabel
+	valueStyle := StyleDetailValue
+
+	headerCol := func(name, val string) string {
+		return labelStyle.Render(fmt.Sprintf("%-4s", name)) + " " + valueStyle.Render(fmt.Sprintf("%-8s", val))
+	}
+
+	line := "  " + labelStyle.Render(fmt.Sprintf("%-6s", label)) + " " +
+		headerCol("P50", formatLatencyMs(ls.P50)) + "  " +
+		headerCol("P95", formatLatencyMs(ls.P95)) + "  " +
+		headerCol("P99", formatLatencyMs(ls.P99))
+
+	// All-zero invariant: nothing real to plot, skip the sparkline row.
+	if ls.P99 <= 0 {
+		return line + "\n"
+	}
+	// Narrow terminals: omit the sparkline row entirely (no truncation hack).
+	if innerWidth < 80 {
+		return line + "\n"
+	}
+	spark := "         " + renderCDFSparkline(ls.CDFPoints)
+	return line + "\n" + spark + "\n"
 }
 
 func overlayMetricLine(label1, val1, label2, val2 string, width int) string {

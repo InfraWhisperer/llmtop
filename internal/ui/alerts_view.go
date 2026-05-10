@@ -51,40 +51,34 @@ var (
 
 // RenderAlertsHeader renders the alerts header with severity pill counts.
 func RenderAlertsHeader(crit, warn, info int, version string, intervalSec int, width int) string {
-	title := StyleHeaderTitle.Render("llmtop " + version)
+	title := StyleHeaderTitle.Render(" llmtop " + version)
 
 	alertLabel := StyleHeaderStat.Render("Alerts")
 
 	var pills []string
 	if crit > 0 {
-		pills = append(pills, StyleMetricBad.Bold(true).Render(fmt.Sprintf("%d critical", crit)))
+		pills = append(pills, StyleMetricBad.Bold(true).Inherit(StyleHeaderBar).Render(" "+fmt.Sprintf("%d critical", crit)))
 	}
 	if warn > 0 {
-		pills = append(pills, StyleMetricWarn.Bold(true).Render(fmt.Sprintf("%d warning", warn)))
+		pills = append(pills, StyleMetricWarn.Bold(true).Inherit(StyleHeaderBar).Render(" "+fmt.Sprintf("%d warning", warn)))
 	}
 	if info > 0 {
-		pills = append(pills, lipgloss.NewStyle().Foreground(colorBlue).Bold(true).Render(fmt.Sprintf("%d info", info)))
+		pills = append(pills, lipgloss.NewStyle().Foreground(colorBlue).Bold(true).Inherit(StyleHeaderBar).Render(" "+fmt.Sprintf("%d info", info)))
 	}
 
 	interval := StyleHeaderStat.Render(fmt.Sprintf("↻ %ds", intervalSec))
-	dot := StyleHeaderDot.Render("·")
+	dot := StyleHeaderDot.Render(" · ")
 
-	parts := []string{" " + title, dot, alertLabel}
-	for _, p := range pills {
-		parts = append(parts, p)
-	}
-	parts = append(parts, dot, interval+" ")
+	parts := []string{title, dot, alertLabel}
+	parts = append(parts, pills...)
+	parts = append(parts, dot, interval)
 
-	header := ""
+	var header strings.Builder
 	for _, p := range parts {
-		header += p + " "
+		header.WriteString(p)
 	}
 
-	return lipgloss.NewStyle().
-		Width(width).
-		Background(colorDark).
-		Foreground(colorWhite).
-		Render(header)
+	return renderHeaderBar(header.String(), width)
 }
 
 // RenderAlertsList renders the alert list with active and resolved sections.

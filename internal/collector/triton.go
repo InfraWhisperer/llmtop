@@ -127,12 +127,36 @@ func parseTritonMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, p
 		}
 	}
 
-	// First response histogram (disabled by default, but parse if available)
+	// First response histogram (disabled by default, but parse if available).
+	// Triton emits ms-unit histograms — buckets need no conversion. Populate
+	// the LatencySnapshot directly so CDFPoints are aligned to ms thresholds.
 	if p50, ok := pm.GetHistogramQuantileAny("nv_inference_first_response_histogram_ms", 0.50); ok {
-		m.TTFT_P50 = p50 // already in ms
+		m.TTFT_P50 = p50
+		m.TTFT.P50 = p50
+	}
+	if p95, ok := pm.GetHistogramQuantileAny("nv_inference_first_response_histogram_ms", 0.95); ok {
+		m.TTFT.P95 = p95
 	}
 	if p99, ok := pm.GetHistogramQuantileAny("nv_inference_first_response_histogram_ms", 0.99); ok {
-		m.TTFT_P99 = p99 // already in ms
+		m.TTFT_P99 = p99
+		m.TTFT.P99 = p99
+	}
+	if m.TTFT.P95 > m.TTFT.P99 {
+		m.TTFT.P95 = m.TTFT.P99
+	}
+	if m.TTFT.P99 > 0 {
+		if buckets, total, ok := pm.GetHistogramBucketsAny("nv_inference_first_response_histogram_ms"); ok {
+			// Triton bucket UpperBounds are already in ms; convert to a "seconds"
+			// view for ComputeCDFPoints, which expects seconds. Multiplying both
+			// the bucket UpperBound and maxLatencyMs by the same scalar leaves
+			// the resulting fractions unchanged — pass buckets and ms threshold
+			// to a synthetic /1000-scale comparison by adapting the buckets.
+			scaled := make([]metrics.HistogramBucket, len(buckets))
+			for i, b := range buckets {
+				scaled[i] = metrics.HistogramBucket{UpperBound: b.UpperBound / 1000.0, Count: b.Count}
+			}
+			m.TTFT.CDFPoints = metrics.ComputeCDFPoints(scaled, total, m.TTFT.P99)
+		}
 	}
 
 	// Store counters for rate computation

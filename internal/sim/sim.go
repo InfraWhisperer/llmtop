@@ -321,6 +321,41 @@ func (s *Simulator) Tick(dt float64) {
 	}
 }
 
+// SwitchScenario resets the simulation to t=0 of the named scenario. It
+// re-runs InitWorker on every existing worker, reseeding from each worker's
+// own RNG so the noise sequence diverges from the previous run while the
+// topology (worker names, ports, GPU bindings) is preserved. Unknown names
+// fall through to "steady" via GetScenario.
+//
+// Safe for concurrent use with Tick: the write lock blocks Tick until reset
+// completes.
+func (s *Simulator) SwitchScenario(name string) {
+	scenario := GetScenario(name)
+	if s.cfg.TickRate > 0 {
+		scenario.TickRate = s.cfg.TickRate
+	}
+	if s.cfg.Duration > 0 {
+		scenario.Duration = s.cfg.Duration
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.scenario = scenario
+	s.simTime = 0
+
+	for _, ws := range s.workers {
+		// The benchmark-runner is deliberately permanently offline (topology
+		// init sets it that way). Preserve that across scenario switches.
+		preserveOffline := ws.Name == "sim-benchmark-runner"
+		seed := s.rng.Int63()
+		InitWorker(ws, seed)
+		if preserveOffline {
+			ws.Online = false
+		}
+	}
+}
+
 // AdvanceTo advances the simulation to the given simulated time.
 func (s *Simulator) AdvanceTo(t time.Duration) {
 	target := t.Seconds()

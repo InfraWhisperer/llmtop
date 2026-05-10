@@ -123,9 +123,16 @@ func RenderKVCacheView(workers []*metrics.WorkerMetrics, width int) string {
 		return online[i].KVCacheUsagePct > online[j].KVCacheUsagePct
 	})
 
-	// NVMe column visibility: show only if any worker has >0 NVMe usage.
-	// No NVMe field exists yet, so this is always false.
+	// F1: NVMe column visibility — toggle when any online worker has >0
+	// NVMe usage. Zero everywhere means "absent", and we hide the columns
+	// entirely so the table layout doesn't shift.
 	showNVMe := false
+	for _, w := range online {
+		if w.KVCacheUsageNVMePct > 0 {
+			showNVMe = true
+			break
+		}
+	}
 
 	workerW := kcWorkerWidth(width, showNVMe)
 
@@ -212,24 +219,34 @@ func renderKCSummaryRow(online []*metrics.WorkerMetrics, workerW int, showNVMe b
 		tiers++
 	}
 
-	// Compute averages.
-	var gpuSum, cpuSum, hitSum, evictSum, prestageSum float64
-	var hitCount int
+	// Compute averages. F1 adds NVMe averaging, F6 restricts the PRESTAGE
+	// average to prefill workers reporting KVTransferP99Ms (decode workers
+	// always carry 0 here and would skew the mean).
+	var gpuSum, cpuSum, nvmeSum, hitSum, evictSum, prestageSum float64
+	var hitCount, prestageCount int
 	for _, w := range online {
 		gpuSum += w.KVCacheUsagePct
 		cpuSum += w.KVCacheUsageCPUPct
+		nvmeSum += w.KVCacheUsageNVMePct
 		if w.CacheHitRatePct > 0 {
 			hitSum += w.CacheHitRatePct
 			hitCount++
 		}
 		evictSum += w.EvictPerSec
-		prestageSum += w.TTFT_P50
+		if w.KVTransferP99Ms > 0 {
+			prestageSum += w.KVTransferP99Ms
+			prestageCount++
+		}
 	}
 	fn := float64(n)
 	avgGPU := gpuSum / fn
 	avgCPU := cpuSum / fn
+	avgNVMe := nvmeSum / fn
 	avgEvict := evictSum / fn
-	avgPrestage := prestageSum / fn
+	var avgPrestage float64
+	if prestageCount > 0 {
+		avgPrestage = prestageSum / float64(prestageCount)
+	}
 	var avgHit float64
 	if hitCount > 0 {
 		avgHit = hitSum / float64(hitCount)
@@ -247,8 +264,8 @@ func renderKCSummaryRow(online []*metrics.WorkerMetrics, workerW int, showNVMe b
 	parts := []string{label, role, gpuBar, gpuPct, cpuBar, cpuPct}
 
 	if showNVMe {
-		parts = append(parts, renderTierBar(0, colKCNVMeBar, colorTierNVMe))
-		parts = append(parts, bold.Render(padRight("0%", colKCNVMePct)))
+		parts = append(parts, renderTierBar(avgNVMe, colKCNVMeBar, colorTierNVMe))
+		parts = append(parts, bold.Render(padRight(fmt.Sprintf("%.0f%%", avgNVMe), colKCNVMePct)))
 	}
 
 	hitStr := formatKCPct(avgHit, colKCHit)
@@ -287,8 +304,9 @@ func renderKCWorkerRow(w *metrics.WorkerMetrics, workerW int, showNVMe bool) str
 	parts := []string{workerStr, roleStr, gpuBar, gpuPct, cpuBar, cpuPct}
 
 	if showNVMe {
-		parts = append(parts, renderTierBar(0, colKCNVMeBar, colorTierNVMe))
-		parts = append(parts, padRight("0%", colKCNVMePct))
+		// F1: render this worker's NVMe %; zero workers show ░░░░░░░░ 0%.
+		parts = append(parts, renderTierBar(w.KVCacheUsageNVMePct, colKCNVMeBar, colorTierNVMe))
+		parts = append(parts, padRight(fmt.Sprintf("%.0f%%", w.KVCacheUsageNVMePct), colKCNVMePct))
 	}
 
 	// HIT%
@@ -303,12 +321,14 @@ func renderKCWorkerRow(w *metrics.WorkerMetrics, workerW int, showNVMe bool) str
 	evictPlain := padRight(fmt.Sprintf("%.1f", w.EvictPerSec), colKCEvict)
 	parts = append(parts, evictColor(w.EvictPerSec).Render(evictPlain))
 
-	// PRESTAGE (using TTFT_P50 as proxy)
-	prestagePlain := formatKCLatency(w.TTFT_P50, colKCPrestage)
-	if w.TTFT_P50 == 0 {
+	// F6: PRESTAGE — true KV transfer P99 (vllm:kv_cache_offload_time_seconds),
+	// not TTFT_P50 proxy. Decode/mono workers always have 0 here and render
+	// as "—".
+	prestagePlain := formatKCLatency(w.KVTransferP99Ms, colKCPrestage)
+	if w.KVTransferP99Ms == 0 {
 		parts = append(parts, StyleMetricNA.Render(prestagePlain))
 	} else {
-		parts = append(parts, prestageColor(w.TTFT_P50).Render(prestagePlain))
+		parts = append(parts, prestageColor(w.KVTransferP99Ms).Render(prestagePlain))
 	}
 
 	return "  " + strings.Join(parts, " ")

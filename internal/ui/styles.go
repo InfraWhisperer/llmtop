@@ -46,23 +46,25 @@ var (
 	// Header styles
 	StyleHeaderBar = lipgloss.NewStyle().
 			Background(colorDark).
-			Foreground(colorWhite).
-			Bold(true).
-			Padding(0, 1)
+			Foreground(colorWhite)
 
 	StyleHeaderTitle = lipgloss.NewStyle().
 				Foreground(colorCyan).
-				Bold(true)
+				Bold(true).
+				Inherit(StyleHeaderBar)
 
 	StyleHeaderStat = lipgloss.NewStyle().
-			Foreground(colorWhite)
+			Foreground(colorWhite).
+			Inherit(StyleHeaderBar)
 
 	StyleHeaderValue = lipgloss.NewStyle().
 				Foreground(colorGreen).
-				Bold(true)
+				Bold(true).
+				Inherit(StyleHeaderBar)
 
 	StyleHeaderDot = lipgloss.NewStyle().
-			Foreground(colorSubtext)
+			Foreground(colorSubtext).
+			Inherit(StyleHeaderBar)
 
 	// Table styles
 	StyleTableHeader = lipgloss.NewStyle().
@@ -224,12 +226,14 @@ var (
 	// Header amber pill
 	StyleHeaderAmber = lipgloss.NewStyle().
 				Foreground(colorYellow).
-				Bold(true)
+				Bold(true).
+				Inherit(StyleHeaderBar)
 
 	// Header red pill
 	StyleHeaderRed = lipgloss.NewStyle().
 			Foreground(colorRed).
-			Bold(true)
+			Bold(true).
+			Inherit(StyleHeaderBar)
 )
 
 // KVCacheStyle returns the appropriate style based on KV cache usage percentage.

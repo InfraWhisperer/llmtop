@@ -144,7 +144,12 @@ func renderPrefillCard(w *metrics.WorkerMetrics, cardWidth int) string {
 	}
 	lines = append(lines, cardRowStyled("TTFT p99", ttftStyled, innerWidth))
 
-	lines = append(lines, cardRow("KV xfer lat", "-", innerWidth))
+	// F6: real KV transfer P99 in ms; "—" when absent.
+	xferStr := "—"
+	if w.KVTransferP99Ms > 0 {
+		xferStr = formatMsValue(w.KVTransferP99Ms)
+	}
+	lines = append(lines, cardRow("KV xfer lat", xferStr, innerWidth))
 
 	tokTotal := w.PromptTokPerSec + w.GenTokPerSec
 	lines = append(lines, cardRow("Tok/s out", formatThroughput(tokTotal), innerWidth))

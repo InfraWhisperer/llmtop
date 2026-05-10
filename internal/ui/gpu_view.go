@@ -28,7 +28,7 @@ func GPUSortColumnName(s GPUSortColumn) string {
 
 // RenderGPUHeader renders the GPU fleet summary header bar.
 func RenderGPUHeader(summary metrics.GPUSummary, version string, intervalSec int, width int) string {
-	title := StyleHeaderTitle.Render("llmtop " + version + " — GPU")
+	title := StyleHeaderTitle.Render(" llmtop " + version + " — GPU")
 
 	gpuCount := StyleHeaderStat.Render(
 		fmt.Sprintf("%d GPUs (%d active)", summary.TotalGPUs, summary.ActiveGPUs),
@@ -47,30 +47,21 @@ func RenderGPUHeader(summary metrics.GPUSummary, version string, intervalSec int
 
 	interval := StyleHeaderStat.Render(fmt.Sprintf("↻ %ds", intervalSec))
 
-	dot := StyleHeaderDot.Render("·")
+	dot := StyleHeaderDot.Render(" · ")
 
 	parts := []string{
-		" " + title,
-		dot,
-		gpuCount,
-		dot,
-		avgUtilLabel + " " + avgUtil,
-		dot,
-		memLabel + " " + memUsed + " " + memPctStr,
-		dot,
-		interval + " ",
+		title, dot, gpuCount, dot,
+		avgUtilLabel + StyleHeaderStat.Render(" ") + avgUtil, dot,
+		memLabel + StyleHeaderStat.Render(" ") + memUsed + StyleHeaderStat.Render(" ") + memPctStr, dot,
+		interval,
 	}
 
-	header := ""
+	var header strings.Builder
 	for _, p := range parts {
-		header += p + " "
+		header.WriteString(p)
 	}
 
-	return lipgloss.NewStyle().
-		Width(width).
-		Background(colorDark).
-		Foreground(colorWhite).
-		Render(header)
+	return renderHeaderBar(header.String(), width)
 }
 
 func gpuPodLabel(g *metrics.GPUInfo) string {

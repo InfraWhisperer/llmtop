@@ -61,7 +61,7 @@ func TestAlertManagerFiresScrapeFailure(t *testing.T) {
 	am.mu.Unlock()
 
 	am.Evaluate(state)
-	c, _, _ := am.Counts()
+	_, _, c := am.Counts()
 	if c == 0 {
 		t.Error("expected at least 1 critical alert for scrape failure")
 	}
@@ -78,7 +78,7 @@ func TestAlertManagerResolvesOnRecovery(t *testing.T) {
 	}
 	am.Evaluate(state)
 
-	c, _, _ := am.Counts()
+	_, _, c := am.Counts()
 	if c == 0 {
 		t.Fatal("expected ECC alert to fire")
 	}
@@ -87,7 +87,7 @@ func TestAlertManagerResolvesOnRecovery(t *testing.T) {
 	state.GPUs[0].ECCErrors = 0
 	am.Evaluate(state)
 
-	c, _, _ = am.Counts()
+	_, _, c = am.Counts()
 	if c != 0 {
 		t.Errorf("expected 0 active critical alerts after resolution, got %d", c)
 	}
@@ -185,7 +185,7 @@ func TestAlertManagerECCError(t *testing.T) {
 	}
 
 	am.Evaluate(state)
-	c, _, _ := am.Counts()
+	_, _, c := am.Counts()
 	if c == 0 {
 		t.Error("expected ECC error critical alert")
 	}
@@ -220,6 +220,43 @@ func TestAlertSeverityString(t *testing.T) {
 		if got := tt.sev.String(); got != tt.want {
 			t.Errorf("AlertSeverity(%d).String() = %q, want %q", tt.sev, got, tt.want)
 		}
+	}
+}
+
+func TestDefaultAlertThresholds_Production(t *testing.T) {
+	def := DefaultAlertThresholds()
+	if def.KVCriticalPct != 90 || def.KVPressurePct != 75 {
+		t.Errorf("default KV thresholds wrong: %+v", def)
+	}
+	if def.ITLSpikeMs != 2000 || def.PrefillQueueDepth != 5 {
+		t.Errorf("default rule thresholds wrong: %+v", def)
+	}
+	if def.KVCriticalDelay != 5*time.Second || def.KVPressureDelay != 30*time.Second {
+		t.Errorf("default delays wrong: %+v", def)
+	}
+}
+
+func TestNewAlertManagerWithThresholds_RespectsCustomKVCritical(t *testing.T) {
+	t1 := DefaultAlertThresholds()
+	t1.KVCriticalPct = 80
+	t1.KVCriticalDelay = 0
+	am := NewAlertManagerWithThresholds(t1)
+	state := &AlertState{
+		Workers: []*WorkerMetrics{{Label: "w", Online: true, KVCacheUsagePct: 85}},
+	}
+	am.Evaluate(state)
+	_, _, crit := am.Counts()
+	if crit < 1 {
+		t.Errorf("expected critical alert at 85 with threshold 80, got %d", crit)
+	}
+}
+
+func TestAlertManager_Thresholds_ReturnsCopy(t *testing.T) {
+	thr := DefaultAlertThresholds()
+	thr.KVCriticalPct = 88
+	am := NewAlertManagerWithThresholds(thr)
+	if am.Thresholds().KVCriticalPct != 88 {
+		t.Errorf("expected stored threshold 88, got %f", am.Thresholds().KVCriticalPct)
 	}
 }
 

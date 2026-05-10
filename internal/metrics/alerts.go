@@ -6,6 +6,48 @@ import (
 	"time"
 )
 
+// AlertThresholds holds user-configurable thresholds and sustained-condition
+// durations for alert rules and the UI event ring. The zero value is not
+// safe to use; call DefaultAlertThresholds() for production defaults.
+//
+// Invariants enforced by callers (config parser):
+//   KVCriticalPct > KVPressurePct
+//   All *Delay fields >= 0
+type AlertThresholds struct {
+	KVCriticalPct      float64       // default 90; must be > KVPressurePct
+	KVPressurePct      float64       // default 75
+	ITLSpikeMs         float64       // default 2000
+	PrefillQueueDepth  int           // default 5
+	CacheHitDropPP     float64       // default 10; percentage points
+	TTFTEventMs        float64       // default 5000; used by detectEvents
+	KVEventPct         float64       // default 75; used by detectEvents
+	KVCriticalDelay    time.Duration // default 5s
+	KVPressureDelay    time.Duration // default 30s
+	ITLSpikeDelay      time.Duration // default 10s
+	PrefillQueueDelay  time.Duration // default 10s
+	ScrapeFailureDelay time.Duration // default 15s
+}
+
+// DefaultAlertThresholds returns the production defaults for alert thresholds.
+// These values match the previous hardcoded constants in evalRule and
+// detectEvents.
+func DefaultAlertThresholds() AlertThresholds {
+	return AlertThresholds{
+		KVCriticalPct:      90,
+		KVPressurePct:      75,
+		ITLSpikeMs:         2000,
+		PrefillQueueDepth:  5,
+		CacheHitDropPP:     10,
+		TTFTEventMs:        5000,
+		KVEventPct:         75,
+		KVCriticalDelay:    5 * time.Second,
+		KVPressureDelay:    30 * time.Second,
+		ITLSpikeDelay:      10 * time.Second,
+		PrefillQueueDelay:  10 * time.Second,
+		ScrapeFailureDelay: 15 * time.Second,
+	}
+}
+
 // AlertSeverity represents the severity level of an alert.
 type AlertSeverity int
 
@@ -28,13 +70,21 @@ func (s AlertSeverity) String() string {
 }
 
 // Alert represents a fired alert with optional resolution.
+//
+// Source carries the human-readable origin label (worker label, cluster
+// scope, or "<host>/gpu<n>"). SourceEndpoint carries the worker endpoint
+// URL when the alert is tied to a single worker — this is what V10's
+// timeline view matches against WorkerMetrics.Endpoint to find the affected
+// worker in historical frames. Cluster-scoped alerts and GPU-scoped alerts
+// leave SourceEndpoint empty.
 type Alert struct {
-	Severity   AlertSeverity
-	Title      string
-	Detail     string
-	Source     string // worker name or "cluster"
-	FiredAt    time.Time
-	ResolvedAt *time.Time // nil if still active
+	Severity       AlertSeverity
+	Title          string
+	Detail         string
+	Source         string // worker label, "cluster", or "<host>/gpu<n>"
+	SourceEndpoint string // worker endpoint URL; empty for cluster/GPU-scoped alerts
+	FiredAt        time.Time
+	ResolvedAt     *time.Time // nil if still active
 }
 
 // IsActive returns true if the alert has not been resolved.
@@ -67,17 +117,34 @@ type AlertManager struct {
 
 	// Duration thresholds: how long a condition must persist before firing
 	pending  map[string]time.Time // keyed by rule+source, tracks when condition first seen
+
+	thresholds AlertThresholds
 }
 
-// NewAlertManager creates an AlertManager with the default production rules.
+// NewAlertManager creates an AlertManager with the default production rules
+// and DefaultAlertThresholds.
 func NewAlertManager() *AlertManager {
+	return NewAlertManagerWithThresholds(DefaultAlertThresholds())
+}
+
+// NewAlertManagerWithThresholds creates an AlertManager using caller-supplied
+// thresholds. All rule evaluations and pending delays read from t.
+func NewAlertManagerWithThresholds(t AlertThresholds) *AlertManager {
 	am := &AlertManager{
 		active:      make(map[string]*Alert),
 		maxResolved: 20,
 		pending:     make(map[string]time.Time),
+		thresholds:  t,
 	}
 	am.rules = defaultRules()
 	return am
+}
+
+// Thresholds returns a copy of the active thresholds.
+func (am *AlertManager) Thresholds() AlertThresholds {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	return am.thresholds
 }
 
 // Evaluate runs all rules against the current state and updates alerts.
@@ -88,14 +155,14 @@ func (am *AlertManager) Evaluate(state *AlertState) {
 	seen := make(map[string]bool)
 
 	for _, rule := range am.rules {
-		alerts := evalRule(rule, state)
+		alerts := evalRule(rule, state, am.thresholds)
 		for _, a := range alerts {
 			key := rule.Name + ":" + a.Source
 			seen[key] = true
 
 			if _, exists := am.active[key]; !exists {
 				// Check pending duration for rules that need sustained conditions
-				dur := ruleDelay(rule.Name)
+				dur := ruleDelay(rule.Name, am.thresholds)
 				if dur > 0 {
 					first, ok := am.pending[key]
 					if !ok {
@@ -157,56 +224,58 @@ func (am *AlertManager) All() []*Alert {
 	return result
 }
 
-// Counts returns (critical, warning, info) counts of active alerts.
+// Counts returns (info, warning, critical) counts of active alerts, ordered
+// by AlertSeverity iota.
 func (am *AlertManager) Counts() (int, int, int) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
-	var c, w, i int
+	var info, warn, crit int
 	for _, a := range am.active {
 		switch a.Severity {
 		case AlertCritical:
-			c++
+			crit++
 		case AlertWarning:
-			w++
+			warn++
 		case AlertInfo:
-			i++
+			info++
 		}
 	}
-	return c, w, i
+	return info, warn, crit
 }
 
 // ruleDelay returns how long a condition must persist before the rule fires.
-func ruleDelay(name string) time.Duration {
+func ruleDelay(name string, t AlertThresholds) time.Duration {
 	switch name {
 	case "itl_spike":
-		return 10 * time.Second
+		return t.ITLSpikeDelay
 	case "scrape_failure":
-		return 15 * time.Second
+		return t.ScrapeFailureDelay
 	case "kv_critical":
-		return 5 * time.Second
+		return t.KVCriticalDelay
 	case "prefill_queue":
-		return 10 * time.Second
+		return t.PrefillQueueDelay
 	case "kv_pressure":
-		return 30 * time.Second
+		return t.KVPressureDelay
 	default:
 		return 0
 	}
 }
 
 // evalRule evaluates a single rule and returns all alerts it would fire.
-func evalRule(rule AlertRule, state *AlertState) []*Alert {
+func evalRule(rule AlertRule, state *AlertState, t AlertThresholds) []*Alert {
 	// Rules that produce per-worker alerts
 	var alerts []*Alert
 	switch rule.Name {
 	case "itl_spike":
 		for _, w := range state.Workers {
-			if w.Online && w.ITL_P99 > 2000 {
+			if w.Online && w.ITL_P99 > t.ITLSpikeMs {
 				alerts = append(alerts, &Alert{
 					Severity: AlertCritical,
-					Title:    fmt.Sprintf("ITL p99 spike on %s: %.0fms (threshold 500ms)", w.Label, w.ITL_P99),
+					Title:    fmt.Sprintf("ITL p99 spike on %s: %.0fms (threshold %.0fms)", w.Label, w.ITL_P99, t.ITLSpikeMs),
 					Detail:   fmt.Sprintf("Worker KV%% %.0f%% · consider KV eviction cascade", w.KVCacheUsagePct),
-					Source:   w.Label,
-					FiredAt:  time.Now(),
+					Source:         w.Label,
+					SourceEndpoint: w.Endpoint,
+					FiredAt:        time.Now(),
 				})
 			}
 		}
@@ -217,20 +286,22 @@ func evalRule(rule AlertRule, state *AlertState) []*Alert {
 					Severity: AlertCritical,
 					Title:    fmt.Sprintf("Scrape failure: %s — all metrics Err", w.Label),
 					Detail:   fmt.Sprintf("vLLM /metrics unreachable · pod Running but port closed"),
-					Source:   w.Label,
-					FiredAt:  time.Now(),
+					Source:         w.Label,
+					SourceEndpoint: w.Endpoint,
+					FiredAt:        time.Now(),
 				})
 			}
 		}
 	case "kv_critical":
 		for _, w := range state.Workers {
-			if w.Online && w.KVCacheUsagePct > 90 {
+			if w.Online && w.KVCacheUsagePct > t.KVCriticalPct {
 				alerts = append(alerts, &Alert{
 					Severity: AlertCritical,
 					Title:    fmt.Sprintf("KV cache critical on %s: %.0f%%", w.Label, w.KVCacheUsagePct),
-					Detail:   "GPU KV cache >90%% · likely eviction cascade",
-					Source:   w.Label,
-					FiredAt:  time.Now(),
+					Detail:   fmt.Sprintf("GPU KV cache >%.0f%% · likely eviction cascade", t.KVCriticalPct),
+					Source:         w.Label,
+					SourceEndpoint: w.Endpoint,
+					FiredAt:        time.Now(),
 				})
 			}
 		}
@@ -248,20 +319,21 @@ func evalRule(rule AlertRule, state *AlertState) []*Alert {
 		}
 	case "prefill_queue":
 		for _, w := range state.Workers {
-			if w.Online && w.Role == "prefill" && w.RequestsWaiting > 5 {
+			if w.Online && w.Role == "prefill" && w.RequestsWaiting > t.PrefillQueueDepth {
 				alerts = append(alerts, &Alert{
 					Severity: AlertWarning,
-					Title:    fmt.Sprintf("Prefill queue depth elevated on %s: queue=%d (threshold 5)", w.Label, w.RequestsWaiting),
+					Title:    fmt.Sprintf("Prefill queue depth elevated on %s: queue=%d (threshold %d)", w.Label, w.RequestsWaiting, t.PrefillQueueDepth),
 					Detail:   fmt.Sprintf("KV%% %.0f%% · TTFT p99 %.0fms · consider scale-out or rebalance", w.KVCacheUsagePct, w.TTFT_P99),
-					Source:   w.Label,
-					FiredAt:  time.Now(),
+					Source:         w.Label,
+					SourceEndpoint: w.Endpoint,
+					FiredAt:        time.Now(),
 				})
 			}
 		}
 	case "cache_hit_drop":
 		if state.PrevCacheHit > 0 && state.Summary.AvgCacheHit > 0 {
 			drop := state.PrevCacheHit - state.Summary.AvgCacheHit
-			if drop > 10 && time.Since(state.PrevCacheHitAt) <= 60*time.Second {
+			if drop > t.CacheHitDropPP && time.Since(state.PrevCacheHitAt) <= 60*time.Second {
 				alerts = append(alerts, &Alert{
 					Severity: AlertWarning,
 					Title:    fmt.Sprintf("Cluster cache hit rate fell below %.0f%%: currently %.0f%%", state.PrevCacheHit, state.Summary.AvgCacheHit),
@@ -285,13 +357,14 @@ func evalRule(rule AlertRule, state *AlertState) []*Alert {
 		}
 	case "kv_pressure":
 		for _, w := range state.Workers {
-			if w.Online && w.KVCacheUsagePct >= 75 && w.KVCacheUsagePct < 90 {
+			if w.Online && w.KVCacheUsagePct >= t.KVPressurePct && w.KVCacheUsagePct < t.KVCriticalPct {
 				alerts = append(alerts, &Alert{
 					Severity: AlertWarning,
 					Title:    fmt.Sprintf("KV cache pressure on %s: %.0f%%", w.Label, w.KVCacheUsagePct),
-					Detail:   "GPU KV cache 75-89%% · approaching eviction threshold",
-					Source:   w.Label,
-					FiredAt:  time.Now(),
+					Detail:   fmt.Sprintf("GPU KV cache %.0f-%.0f%% · approaching eviction threshold", t.KVPressurePct, t.KVCriticalPct-1),
+					Source:         w.Label,
+					SourceEndpoint: w.Endpoint,
+					FiredAt:        time.Now(),
 				})
 			}
 		}

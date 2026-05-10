@@ -72,6 +72,7 @@ func rootCmd() *cobra.Command {
 		kf           k8sFlags
 		simMode      bool
 		simScenario  string
+		demoMode     bool
 	)
 
 	cmd := &cobra.Command{
@@ -82,8 +83,15 @@ func rootCmd() *cobra.Command {
 Monitor GPU cache utilization, request queues, TTFT latency, and token
 throughput across your entire inference fleet in a single glorious view.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// --demo is sugar for --sim --scenario demo with demo-mode UI affordances.
+			if demoMode {
+				if len(endpoints) > 0 {
+					fmt.Fprintln(os.Stderr, "warning: --demo overrides --endpoint; running against the in-process simulator")
+				}
+				return runSim("demo", intervalSec, once, outputFmt, true)
+			}
 			if simMode {
-				return runSim(simScenario, intervalSec, once, outputFmt)
+				return runSim(simScenario, intervalSec, once, outputFmt, false)
 			}
 			return run(endpoints, configFile, intervalSec, once, outputFmt, dcgmEndpoint, kf)
 		},
@@ -107,6 +115,7 @@ throughput across your entire inference fleet in a single glorious view.`,
 	// Simulation flags
 	cmd.Flags().BoolVar(&simMode, "sim", false, "Run with built-in simulation harness (no real cluster needed)")
 	cmd.Flags().StringVar(&simScenario, "scenario", "steady", `Sim scenario: "steady", "demo", "stress", "chaos"`)
+	cmd.Flags().BoolVar(&demoMode, "demo", false, "Demo mode: run against the built-in sim with the 'demo' scenario; equivalent to --sim --scenario demo plus runtime scenario switching")
 
 	cmd.AddCommand(versionCmd())
 
@@ -249,17 +258,46 @@ func run(endpoints []string, configFile string, intervalSec int, once bool, outp
 		workerConfigs = append(workerConfigs, app.TargetsToWorkerConfigs(discovered)...)
 	}
 
+	thresholds, alertsCustom := alertThresholdsFromConfig(cfg)
+
 	return app.New(app.Options{
-		WorkerConfigs:  workerConfigs,
-		Interval:       interval,
-		DCGMEndpoint:   dcgmEndpoint,
-		DCGMFetchFuncs: dcgmFetchFuncs,
-		K8sContext:     k8sContext,
-		Discoverer:     k8sDisc,
-		Once:           once,
-		OutputFormat:   outputFmt,
-		Version:        version,
+		WorkerConfigs:    workerConfigs,
+		Interval:         interval,
+		DCGMEndpoint:     dcgmEndpoint,
+		DCGMFetchFuncs:   dcgmFetchFuncs,
+		K8sContext:       k8sContext,
+		Discoverer:       k8sDisc,
+		Once:             once,
+		OutputFormat:     outputFmt,
+		Version:          version,
+		AlertThresholds:  thresholds,
+		AlertsCustomized: alertsCustom,
 	}).Run(ctx)
+}
+
+// alertThresholdsFromConfig converts config.AlertThresholdsConfig into the
+// runtime metrics.AlertThresholds value. Returns DefaultAlertThresholds() and
+// false when cfg is nil.
+func alertThresholdsFromConfig(cfg *config.Config) (metrics.AlertThresholds, bool) {
+	if cfg == nil {
+		return metrics.DefaultAlertThresholds(), false
+	}
+	a := cfg.Alerts
+	t := metrics.AlertThresholds{
+		KVCriticalPct:      a.KVCriticalPct,
+		KVPressurePct:      a.KVPressurePct,
+		ITLSpikeMs:         a.ITLSpikeMs,
+		PrefillQueueDepth:  a.PrefillQueueDepth,
+		CacheHitDropPP:     a.CacheHitDropPP,
+		TTFTEventMs:        a.TTFTEventMs,
+		KVEventPct:         a.KVEventPct,
+		KVCriticalDelay:    time.Duration(a.KVCriticalDelayS) * time.Second,
+		KVPressureDelay:    time.Duration(a.KVPressureDelayS) * time.Second,
+		ITLSpikeDelay:      time.Duration(a.ITLSpikeDelayS) * time.Second,
+		PrefillQueueDelay:  time.Duration(a.PrefillQueueDelayS) * time.Second,
+		ScrapeFailureDelay: time.Duration(a.ScrapeFailureDelayS) * time.Second,
+	}
+	return t, a.CustomSet
 }
 
 func parseBackend(s string) metrics.Backend {
@@ -289,12 +327,19 @@ func parseBackend(s string) metrics.Backend {
 	}
 }
 
-func runSim(scenario string, intervalSec int, once bool, outputFmt string) error {
+func runSim(scenario string, intervalSec int, once bool, outputFmt string, demoMode bool) error {
 	ctx := context.Background()
 	interval := time.Duration(intervalSec) * time.Second
 
 	cfg := sim.DefaultConfig()
 	cfg.Scenario = scenario
+	if demoMode {
+		// Demo mode runs on OS-assigned ports so `llmtop --demo` doesn't
+		// collide with anything already on 19100/19200/19300.
+		cfg.PortBase = 0
+		cfg.DCGMPort = 0
+		cfg.K8sPort = 0
+	}
 
 	s := sim.New(cfg)
 	if err := s.Start(); err != nil {
@@ -317,7 +362,7 @@ func runSim(scenario string, intervalSec int, once bool, outputFmt string) error
 		})
 	}
 
-	return app.New(app.Options{
+	opts := app.Options{
 		WorkerConfigs: workerConfigs,
 		Interval:      interval,
 		DCGMEndpoint:  s.DCGMURL(),
@@ -325,5 +370,10 @@ func runSim(scenario string, intervalSec int, once bool, outputFmt string) error
 		Once:          once,
 		OutputFormat:  outputFmt,
 		Version:       version,
-	}).Run(ctx)
+	}
+	if demoMode {
+		opts.DemoMode = true
+		opts.ScenarioSwitcher = s.SwitchScenario
+	}
+	return app.New(opts).Run(ctx)
 }

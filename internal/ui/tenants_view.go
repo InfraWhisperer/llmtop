@@ -112,7 +112,9 @@ func formatTenantHitRate(pct float64) string {
 	return fmt.Sprintf("%.0f%%", pct)
 }
 
-// renderTenantCard renders a single tenant card with metrics fields.
+// renderTenantCard renders a single tenant card with metrics fields. When
+// the model group has TopTenants populated (F3), it appends a "Top tenants"
+// sub-block with up to 5 rows ranked by request share.
 func renderTenantCard(g metrics.ModelGroup, cardWidth int) string {
 	titleColor := tenantCardColor(g.ModelName)
 	titleStyle := lipgloss.NewStyle().
@@ -153,6 +155,22 @@ func renderTenantCard(g metrics.ModelGroup, cardWidth int) string {
 		lines = append(lines, l+"  "+v)
 	}
 
+	// F3: top-tenants block. Skip silently when TopTenants is empty so the
+	// card layout matches the pre-feature placeholder for backends that
+	// don't emit request_tag (TGI, NIM, etc).
+	if len(g.TopTenants) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, labelStyle.Render("Top tenants"))
+		// Inner width inside the card border (Padding(1,2) eats 4 cols).
+		inner := cardWidth - 4
+		if inner < 20 {
+			inner = 20
+		}
+		for _, t := range tenantRowsForCard(g.TopTenants) {
+			lines = append(lines, renderTenantRow(t, inner))
+		}
+	}
+
 	content := strings.Join(lines, "\n")
 
 	return lipgloss.NewStyle().
@@ -161,4 +179,38 @@ func renderTenantCard(g metrics.ModelGroup, cardWidth int) string {
 		BorderForeground(lipgloss.Color("#21262d")).
 		Padding(1, 2).
 		Render(content)
+}
+
+// tenantRowsForCard returns up to 5 tenants from the (already-sorted) list,
+// defensively trimming if the contract is violated upstream.
+func tenantRowsForCard(tt []metrics.TenantMetrics) []metrics.TenantMetrics {
+	if len(tt) > 5 {
+		return tt[:5]
+	}
+	return tt
+}
+
+// renderTenantRow renders a single tenant row in the format:
+//
+//	team-search    35%   1.2k tok/s
+//
+// The TAG column flexes to fill the card; SHARE% and TOK/S are
+// right-aligned. The "⚠ TTFT" indicator is intentionally omitted: per
+// spec Open Q §1, vLLM does not emit per-request_tag histograms, so any
+// per-tenant TTFT P99 would be synthesized — explicitly out of scope.
+func renderTenantRow(t metrics.TenantMetrics, innerWidth int) string {
+	share := fmt.Sprintf("%.0f%%", t.RequestShare*100)
+	tok := formatTenantTokPerSec(t.TokPerSec) + " tok/s"
+	// 4-char share column + spacer + tok column = right-side reserved width.
+	rhs := share + "  " + tok
+	tagW := innerWidth - len(rhs) - 2
+	if tagW < 6 {
+		tagW = 6
+	}
+	tag := truncate(t.Tag, tagW)
+	tagPad := padRight(tag, tagW)
+	tagStyle := lipgloss.NewStyle().Foreground(colorWhite)
+	shareStyle := lipgloss.NewStyle().Foreground(colorYellow)
+	tokStyle := lipgloss.NewStyle().Foreground(colorGreen)
+	return tagStyle.Render(tagPad) + "  " + shareStyle.Render(share) + "  " + tokStyle.Render(tok)
 }

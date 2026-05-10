@@ -18,6 +18,9 @@ func RenderWorkerMetrics(w *WorkerState) string {
 	// Core gauges
 	sb.WriteString(promGauge("vllm:gpu_cache_usage_perc", labels, w.KVPercGPU))
 	sb.WriteString(promGauge("vllm:cpu_cache_usage_perc", labels, w.KVPercCPU))
+	if w.KVPercNVMe > 0 {
+		sb.WriteString(promGauge("vllm:nvme_cache_usage_perc", labels, w.KVPercNVMe))
+	}
 	sb.WriteString(promGauge("vllm:num_requests_running", labels, float64(w.RunningReqs)))
 	sb.WriteString(promGauge("vllm:num_requests_waiting", labels, float64(w.QueueDepth)))
 	sb.WriteString(promGauge("vllm:gpu_prefix_cache_hit_rate", labels, w.CacheHitRate))
@@ -43,10 +46,12 @@ func RenderWorkerMetrics(w *WorkerState) string {
 	sb.WriteString(renderHistogram("vllm:time_per_output_token_seconds", labels,
 		w.ITLp99Ms/1000.0, w.GenToks/100))
 
-	// KV offload (prefill only)
+	// KV offload histogram (prefill only). Synthetic P99 is ~2% of TTFT P99 —
+	// matches the disagg invariant where prestage is small relative to TTFT.
 	if w.Role == "prefill" {
-		sb.WriteString(promCounter("vllm:kv_cache_offload_time_seconds_sum", labels, float64(w.RequestsTotal)*0.003))
-		sb.WriteString(promCounter("vllm:kv_cache_offload_time_seconds_count", labels, float64(w.RequestsTotal)))
+		xferP99Sec := (w.TTFTp99Ms * 0.02) / 1000.0
+		sb.WriteString(renderHistogram("vllm:kv_cache_offload_time_seconds", labels,
+			xferP99Sec, w.RequestsTotal))
 	}
 
 	return sb.String()

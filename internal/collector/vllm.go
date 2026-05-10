@@ -56,6 +56,11 @@ func parseVLLMMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, pre
 		m.KVCacheUsageCPUPct = v * 100
 	}
 
+	// NVMe KV cache usage (0.0-1.0 → 0-100%, absent in current vLLM but reserved for LMCache-aware deployments)
+	if v, _, ok := pm.GetGaugeAny("vllm:nvme_cache_usage_perc"); ok {
+		m.KVCacheUsageNVMePct = v * 100
+	}
+
 	// Prefix cache hit rate (0.0-1.0 → convert to 0-100%)
 	// Newer vLLM exports counters (prefix_cache_hits_total / prefix_cache_queries_total) instead of a gauge
 	if v, _, ok := pm.GetGaugeAny("vllm:gpu_prefix_cache_hit_rate"); ok {
@@ -68,26 +73,11 @@ func parseVLLMMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, pre
 		}
 	}
 
-	// Time to first token histogram (in seconds → convert to ms)
-	if p50, ok := pm.GetHistogramQuantileAny("vllm:time_to_first_token_seconds", 0.50); ok {
-		m.TTFT_P50 = p50 * 1000
-	}
-	if p99, ok := pm.GetHistogramQuantileAny("vllm:time_to_first_token_seconds", 0.99); ok {
-		m.TTFT_P99 = p99 * 1000
-	}
-
-	// Inter-token latency histogram (seconds → ms)
-	// Newer vLLM uses vllm:inter_token_latency_seconds or vllm:request_time_per_output_token_seconds
-	if p50, ok := pm.GetHistogramQuantileAny("vllm:time_per_output_token_seconds", 0.50); ok {
-		m.ITL_P50 = p50 * 1000
-	} else if p50, ok := pm.GetHistogramQuantileAny("vllm:inter_token_latency_seconds", 0.50); ok {
-		m.ITL_P50 = p50 * 1000
-	}
-	if p99, ok := pm.GetHistogramQuantileAny("vllm:time_per_output_token_seconds", 0.99); ok {
-		m.ITL_P99 = p99 * 1000
-	} else if p99, ok := pm.GetHistogramQuantileAny("vllm:inter_token_latency_seconds", 0.99); ok {
-		m.ITL_P99 = p99 * 1000
-	}
+	// TTFT and ITL: legacy scalar fields plus the new LatencySnapshot view.
+	populateLatency(m, pm,
+		"vllm:time_to_first_token_seconds",
+		[]string{"vllm:time_per_output_token_seconds", "vllm:inter_token_latency_seconds"},
+	)
 
 	// Token throughput: compute rate from counters
 	// We use prev snapshot to compute delta/time
@@ -123,6 +113,27 @@ func parseVLLMMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, pre
 		}
 	}
 
+	// Per-tenant request counter snapshot. Always populate the raw counters
+	// from this poll; the rate is implied by the next poll's delta against
+	// counters.tenantReqTotals. The map stays at zero on first poll.
+	tagCounters := pm.GetAllGaugesByLabel("vllm:request_success_total", "request_tag")
+	if len(tagCounters) > 0 {
+		m.TenantReqs = make(map[string]float64, len(tagCounters))
+		for tag, v := range tagCounters {
+			m.TenantReqs[tag] = v
+		}
+	}
+
+	// KV transfer P99 (prefill workers only). vLLM disagg / Dynamo emits
+	// vllm:kv_cache_offload_time_seconds; decode/mono workers never receive
+	// offloaded blocks, so keep their value at 0 even if a synthetic histogram
+	// happens to be present.
+	if m.Role == "prefill" {
+		if p99, ok := pm.GetHistogramQuantileAny("vllm:kv_cache_offload_time_seconds", 0.99); ok {
+			m.KVTransferP99Ms = p99 * 1000
+		}
+	}
+
 	// Store raw counters for next rate calculation
 	var counters counterState
 	if v, _, ok := pm.GetGaugeAny("vllm:prompt_tokens_total"); ok {
@@ -133,6 +144,9 @@ func parseVLLMMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, pre
 	}
 	if v, _, ok := pm.GetGaugeAny("vllm:num_preemptions_total"); ok {
 		counters.preemptionsTotal = v
+	}
+	if len(tagCounters) > 0 {
+		counters.tenantReqTotals = tagCounters
 	}
 
 	// Dynamo runtime augmentation: Dynamo pods emit dynamo_component_* metrics

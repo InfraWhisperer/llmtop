@@ -156,6 +156,128 @@ func (pm *ParsedMetrics) GetHistogramSumAny(name string) (float64, bool) {
 	return 0, false
 }
 
+// GetHistogramBucketsAny returns the buckets for a named histogram (any labels).
+// Returns (sortedBuckets, totalCount, found). Buckets are sorted by UpperBound asc.
+// First match wins for histograms with multiple label sets.
+func (pm *ParsedMetrics) GetHistogramBucketsAny(name string) ([]HistogramBucket, float64, bool) {
+	for _, h := range pm.Histograms {
+		if h.Name == name {
+			out := make([]HistogramBucket, len(h.Buckets))
+			copy(out, h.Buckets)
+			sort.Slice(out, func(i, j int) bool {
+				return out[i].UpperBound < out[j].UpperBound
+			})
+			return out, h.Count, true
+		}
+	}
+	return nil, 0, false
+}
+
+// GetAllGaugesByLabel returns all samples for a metric, grouped by the value of
+// labelKey. Result maps each distinct label value to the first matching sample
+// value encountered. Samples missing labelKey are skipped.
+func (pm *ParsedMetrics) GetAllGaugesByLabel(name, labelKey string) map[string]float64 {
+	out := make(map[string]float64)
+	for _, s := range pm.Samples {
+		if s.Name != name {
+			continue
+		}
+		v, ok := s.Labels[labelKey]
+		if !ok {
+			continue
+		}
+		if _, exists := out[v]; exists {
+			continue
+		}
+		out[v] = s.Value
+	}
+	return out
+}
+
+// cdfBucketCountAtLatency returns the cumulative request count at a target
+// latency (in seconds) by linearly interpolating across buckets sorted asc by
+// UpperBound. buckets must be sorted ascending; totalCount is the histogram's
+// _count.
+//
+// Special case: a histogram with only a +Inf bucket carries no distribution
+// information — the only signal is that all observed requests completed at
+// some latency. Return totalCount for any non-negative target so the resulting
+// CDF is all-1.0, matching spec F2 edge case 1.
+func cdfBucketCountAtLatency(buckets []HistogramBucket, totalCount, targetSec float64) float64 {
+	if len(buckets) == 0 || totalCount <= 0 {
+		return 0
+	}
+	if len(buckets) == 1 && math.IsInf(buckets[0].UpperBound, 1) {
+		return totalCount
+	}
+	if targetSec <= 0 {
+		// All finite buckets cover [0, ub]; the count below 0 is 0.
+		return 0
+	}
+	// Walk buckets; find the first bucket whose UpperBound >= targetSec.
+	var prevUB, prevCount float64
+	for _, b := range buckets {
+		ub := b.UpperBound
+		if math.IsInf(ub, 1) {
+			// +Inf bucket: cumulative count is the total. If targetSec is finite
+			// and we got here, target lies between prevUB and +Inf — saturate at
+			// totalCount.
+			return totalCount
+		}
+		if ub >= targetSec {
+			if b.Count <= prevCount {
+				return prevCount
+			}
+			frac := (targetSec - prevUB) / (ub - prevUB)
+			return prevCount + frac*(b.Count-prevCount)
+		}
+		prevUB = ub
+		prevCount = b.Count
+	}
+	// targetSec exceeds all finite buckets — saturate.
+	return totalCount
+}
+
+// ComputeCDFPoints samples 10 evenly-spaced latency thresholds in
+// [0, maxLatencyMs] and returns the cumulative request fraction at each.
+// buckets are histogram buckets with UpperBound in seconds; totalCount is
+// the histogram _count. Returns a zero array when maxLatencyMs <= 0 or
+// totalCount <= 0. Output is monotonically non-decreasing and clamped to
+// [0.0, 1.0].
+func ComputeCDFPoints(buckets []HistogramBucket, totalCount float64, maxLatencyMs float64) [10]float64 {
+	var out [10]float64
+	if maxLatencyMs <= 0 || totalCount <= 0 || len(buckets) == 0 {
+		return out
+	}
+	sorted := make([]HistogramBucket, len(buckets))
+	copy(sorted, buckets)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].UpperBound < sorted[j].UpperBound
+	})
+	step := maxLatencyMs / 9.0
+	var prev float64
+	for i := 0; i < 10; i++ {
+		latencyMs := step * float64(i)
+		latencySec := latencyMs / 1000.0
+		count := cdfBucketCountAtLatency(sorted, totalCount, latencySec)
+		frac := count / totalCount
+		if frac < 0 {
+			frac = 0
+		}
+		if frac > 1 {
+			frac = 1
+		}
+		// Enforce monotonic non-decreasing in the face of bucket sparseness or
+		// floating-point jitter.
+		if frac < prev {
+			frac = prev
+		}
+		out[i] = frac
+		prev = frac
+	}
+	return out
+}
+
 // estimateQuantile estimates a quantile value from histogram buckets using linear interpolation.
 func estimateQuantile(buckets []HistogramBucket, totalCount float64, quantile float64) float64 {
 	if len(buckets) == 0 || totalCount == 0 {

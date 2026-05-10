@@ -71,21 +71,11 @@ func parseNIMMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, prev
 		m.CacheHitRatePct = v * 100
 	}
 
-	// TTFT histogram (seconds -> ms)
-	if p50, ok := pm.GetHistogramQuantileAny("time_to_first_token_seconds", 0.50); ok {
-		m.TTFT_P50 = p50 * 1000
-	}
-	if p99, ok := pm.GetHistogramQuantileAny("time_to_first_token_seconds", 0.99); ok {
-		m.TTFT_P99 = p99 * 1000
-	}
-
-	// ITL histogram (seconds -> ms)
-	if p50, ok := pm.GetHistogramQuantileAny("time_per_output_token_seconds", 0.50); ok {
-		m.ITL_P50 = p50 * 1000
-	}
-	if p99, ok := pm.GetHistogramQuantileAny("time_per_output_token_seconds", 0.99); ok {
-		m.ITL_P99 = p99 * 1000
-	}
+	// TTFT/ITL: populate scalar fields and LatencySnapshots in one pass.
+	populateLatency(m, pm,
+		"time_to_first_token_seconds",
+		[]string{"time_per_output_token_seconds"},
+	)
 
 	// Token throughput: counter-delta rate computation.
 	if prev != nil && prev.Online {

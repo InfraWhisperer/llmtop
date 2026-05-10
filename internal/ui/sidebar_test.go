@@ -9,7 +9,7 @@ import (
 )
 
 func TestRenderSidebarNilWorker(t *testing.T) {
-	out := RenderSidebar(nil, nil, nil, 30)
+	out := RenderSidebar(nil, nil, nil, 30, nil)
 	if out == "" {
 		t.Error("expected non-empty sidebar even with nil worker")
 	}
@@ -36,7 +36,7 @@ func TestRenderSidebarGPUSection(t *testing.T) {
 		},
 	}
 
-	out := RenderSidebar(worker, gpus, nil, 30)
+	out := RenderSidebar(worker, gpus, nil, 30, nil)
 
 	if !strings.Contains(out, "GPU") {
 		t.Error("expected GPU section header")
@@ -56,7 +56,7 @@ func TestRenderSidebarKVTiers(t *testing.T) {
 		TTFT_P50:           4.2,
 	}
 
-	out := RenderSidebar(worker, nil, nil, 30)
+	out := RenderSidebar(worker, nil, nil, 30, nil)
 
 	if !strings.Contains(out, "KV TIERS") {
 		t.Error("expected KV TIERS section header")
@@ -79,7 +79,7 @@ func TestRenderSidebarEvents(t *testing.T) {
 	ring.Push(metrics.SeverityOK, "w2 joined pool")
 
 	events := ring.All()
-	out := RenderSidebar(worker, nil, events, 30)
+	out := RenderSidebar(worker, nil, events, 30, nil)
 
 	if !strings.Contains(out, "RECENT EVENTS") {
 		t.Error("expected RECENT EVENTS section header")
@@ -92,7 +92,7 @@ func TestRenderSidebarNoGPUData(t *testing.T) {
 		NodeName: "node-1",
 	}
 
-	out := RenderSidebar(worker, nil, nil, 30)
+	out := RenderSidebar(worker, nil, nil, 30, nil)
 
 	if !strings.Contains(out, "no DCGM data") {
 		t.Error("expected 'no DCGM data' when no GPUs match node")
@@ -113,10 +113,76 @@ func TestRenderSidebarECCErrors(t *testing.T) {
 		},
 	}
 
-	out := RenderSidebar(worker, gpus, nil, 30)
+	out := RenderSidebar(worker, gpus, nil, 30, nil)
 
 	if !strings.Contains(out, "ECC") {
 		t.Error("expected ECC error display when ECCErrors > 0")
+	}
+}
+
+// TestRenderSidebar_NVMeTierVisibleWhenNonzero exercises F1: the NVMe row
+// appears only when the worker reports KVCacheUsageNVMePct > 0.
+func TestRenderSidebar_NVMeTierVisibleWhenNonzero(t *testing.T) {
+	worker := &metrics.WorkerMetrics{
+		Label:               "prefill-1",
+		KVCacheUsagePct:     60,
+		KVCacheUsageCPUPct:  20,
+		KVCacheUsageNVMePct: 12,
+	}
+	out := RenderSidebar(worker, nil, nil, 30, nil)
+	if !strings.Contains(out, "NVMe SSD") {
+		t.Errorf("expected NVMe SSD tier row when nonzero, got:\n%s", out)
+	}
+}
+
+// TestRenderSidebar_NVMeTierHiddenWhenZero ensures we never render the row
+// for a worker that doesn't report NVMe.
+func TestRenderSidebar_NVMeTierHiddenWhenZero(t *testing.T) {
+	worker := &metrics.WorkerMetrics{
+		Label:           "decode-1",
+		KVCacheUsagePct: 60,
+	}
+	out := RenderSidebar(worker, nil, nil, 30, nil)
+	if strings.Contains(out, "NVMe SSD") {
+		t.Errorf("expected no NVMe row when zero, got:\n%s", out)
+	}
+}
+
+// TestRenderSidebar_KVTransferP99Replaces TTFTProxy verifies F6: the KV
+// xfer p99 row reads KVTransferP99Ms, not TTFT_P50.
+func TestRenderSidebar_KVTransferP99ReplacesTTFTProxy(t *testing.T) {
+	worker := &metrics.WorkerMetrics{
+		Label:           "prefill-1",
+		KVCacheUsagePct: 60,
+		TTFT_P50:        800, // would have shown 800ms under old proxy
+		KVTransferP99Ms: 12,
+	}
+	out := RenderSidebar(worker, nil, nil, 30, nil)
+	if !strings.Contains(out, "KV xfer p99") {
+		t.Errorf("expected 'KV xfer p99' label, got:\n%s", out)
+	}
+	if !strings.Contains(out, "12ms") {
+		t.Errorf("expected '12ms' from KVTransferP99Ms, got:\n%s", out)
+	}
+	if strings.Contains(out, "Prestage lat") {
+		t.Errorf("legacy 'Prestage lat' label must be removed, got:\n%s", out)
+	}
+}
+
+// TestRenderSidebar_KVTransferP99DashWhenZero a worker with no histogram
+// shows "—" rather than 0ms or "Err".
+func TestRenderSidebar_KVTransferP99DashWhenZero(t *testing.T) {
+	worker := &metrics.WorkerMetrics{
+		Label:           "decode-1",
+		KVCacheUsagePct: 50,
+		KVTransferP99Ms: 0,
+	}
+	out := RenderSidebar(worker, nil, nil, 30, nil)
+	if !strings.Contains(out, "KV xfer p99") {
+		t.Errorf("expected label even when zero, got:\n%s", out)
+	}
+	if !strings.Contains(out, "—") {
+		t.Errorf("expected em-dash placeholder for zero, got:\n%s", out)
 	}
 }
 

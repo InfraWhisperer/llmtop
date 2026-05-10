@@ -125,7 +125,7 @@ func TestDataRowCount(t *testing.T) {
 
 func TestRenderTableWithPools(t *testing.T) {
 	workers := poolTestWorkers()
-	output := RenderTable(workers, 0, SortNone, "", 120)
+	output := RenderTable(workers, 0, SortNone, "", 120, 0, 0, nil, nil, "")
 
 	if !strings.Contains(output, "PREFILL POOL") {
 		t.Error("expected PREFILL POOL separator in output")
@@ -143,7 +143,7 @@ func TestRenderTableHeaderColumns(t *testing.T) {
 	workers := []*metrics.WorkerMetrics{
 		{Label: "w1", Role: "mono", Online: true, Backend: metrics.BackendVLLM, KVCacheUsagePct: 55},
 	}
-	output := RenderTable(workers, 0, SortNone, "", 160)
+	output := RenderTable(workers, 0, SortNone, "", 160, 0, 0, nil, nil, "")
 
 	for _, col := range []string{"ROLE", "WORKER", "BACKEND", "KV%", "KV BAR", "QUEUE"} {
 		if !strings.Contains(output, col) {
