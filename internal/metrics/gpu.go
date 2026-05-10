@@ -1,5 +1,7 @@
 package metrics
 
+import "time"
+
 // GPUInfo holds metrics for a single GPU from a DCGM exporter.
 type GPUInfo struct {
 	Index       int
@@ -9,14 +11,18 @@ type GPUInfo struct {
 	UtilPct     float64 // 0-100
 	MemUsedMB   float64 // DCGM_FI_DEV_FB_USED
 	MemTotalMB  float64 // FB_USED + FB_FREE
+	MemBWUtil   float64 // DCGM_FI_DEV_MEM_COPY_UTIL (0-100)
 	TempC       float64
 	PowerW      float64
+	NVLinkGBs   float64 // DCGM_FI_DEV_NVLINK_BANDWIDTH_TOTAL (GB/s)
+	ECCErrors   int64   // DCGM_FI_DEV_ECC_DBE_VOL_TOTAL
 	SMClockMHz  float64
 	MemClockMHz float64
 	Pod         string // DCGM "pod" label (empty if unallocated)
 	Namespace   string
 	Container   string
 	UtilHistory []float64 // ring buffer, max 60 samples
+	LastScrape  time.Time // timestamp of last successful DCGM scrape
 }
 
 // GPUSummary aggregates metrics across all GPUs.

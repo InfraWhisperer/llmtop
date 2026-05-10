@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"math"
 	"testing"
 )
 
@@ -124,5 +125,93 @@ func TestParseLabels(t *testing.T) {
 	}
 	if labels["version"] != "0.6.3" {
 		t.Errorf("expected 0.6.3, got %q", labels["version"])
+	}
+}
+
+func TestGetHistogramBucketsAny_Sorted(t *testing.T) {
+	pm := ParseText(sampleVLLMMetrics)
+	buckets, total, ok := pm.GetHistogramBucketsAny("vllm:time_to_first_token_seconds")
+	if !ok {
+		t.Fatal("expected histogram present")
+	}
+	if total != 100 {
+		t.Errorf("expected count=100, got %f", total)
+	}
+	for i := 1; i < len(buckets); i++ {
+		if buckets[i].UpperBound < buckets[i-1].UpperBound {
+			t.Errorf("buckets not sorted asc at index %d: %f < %f", i, buckets[i].UpperBound, buckets[i-1].UpperBound)
+		}
+	}
+}
+
+func TestGetHistogramBucketsAny_Missing(t *testing.T) {
+	pm := ParseText(sampleVLLMMetrics)
+	_, _, ok := pm.GetHistogramBucketsAny("does_not_exist")
+	if ok {
+		t.Error("expected ok=false for missing histogram")
+	}
+}
+
+func TestGetAllGaugesByLabel_TenantTags(t *testing.T) {
+	src := `vllm:request_success_total{model_name="m",worker="w",request_tag="team-a"} 100
+vllm:request_success_total{model_name="m",worker="w",request_tag="team-b"} 50
+vllm:request_success_total{model_name="m",worker="w",request_tag="team-c"} 25
+`
+	pm := ParseText(src)
+	out := pm.GetAllGaugesByLabel("vllm:request_success_total", "request_tag")
+	if len(out) != 3 {
+		t.Fatalf("expected 3 entries, got %d: %v", len(out), out)
+	}
+	if out["team-a"] != 100 || out["team-b"] != 50 || out["team-c"] != 25 {
+		t.Errorf("unexpected counters: %v", out)
+	}
+}
+
+func TestGetAllGaugesByLabel_AbsentLabel(t *testing.T) {
+	src := `vllm:request_success_total{model_name="m"} 200
+`
+	pm := ParseText(src)
+	out := pm.GetAllGaugesByLabel("vllm:request_success_total", "request_tag")
+	if len(out) != 0 {
+		t.Errorf("expected empty map when label absent, got %v", out)
+	}
+}
+
+func TestComputeCDFPoints_ZeroMaxLatency(t *testing.T) {
+	buckets := []HistogramBucket{{UpperBound: 1.0, Count: 10}}
+	out := ComputeCDFPoints(buckets, 10, 0)
+	for i, v := range out {
+		if v != 0 {
+			t.Errorf("expected zero at index %d, got %f", i, v)
+		}
+	}
+}
+
+func TestComputeCDFPoints_Monotonic(t *testing.T) {
+	pm := ParseText(sampleVLLMMetrics)
+	buckets, total, ok := pm.GetHistogramBucketsAny("vllm:time_to_first_token_seconds")
+	if !ok {
+		t.Fatal("histogram missing")
+	}
+	out := ComputeCDFPoints(buckets, total, 500)
+	prev := 0.0
+	for i, v := range out {
+		if v < 0 || v > 1.0 {
+			t.Errorf("CDF[%d]=%f outside [0,1]", i, v)
+		}
+		if v < prev {
+			t.Errorf("non-monotonic at %d: %f < %f", i, v, prev)
+		}
+		prev = v
+	}
+}
+
+func TestComputeCDFPoints_SingleInfBucketAllOnes(t *testing.T) {
+	buckets := []HistogramBucket{{UpperBound: math.Inf(1), Count: 10}}
+	out := ComputeCDFPoints(buckets, 10, 100)
+	for i, v := range out {
+		if v != 1.0 {
+			t.Errorf("expected 1.0 at index %d, got %f", i, v)
+		}
 	}
 }

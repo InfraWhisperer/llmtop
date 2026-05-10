@@ -137,3 +137,71 @@ func TestVLLMCounterState(t *testing.T) {
 		t.Errorf("counters.genTokensTotal = %f, want 35000", counters.genTokensTotal)
 	}
 }
+
+const sampleVLLMNVMeAndXfer = `vllm:gpu_cache_usage_perc{model_name="m"} 0.5
+vllm:nvme_cache_usage_perc{model_name="m"} 0.42
+vllm:kv_cache_offload_time_seconds_bucket{model_name="m",le="0.005"} 5
+vllm:kv_cache_offload_time_seconds_bucket{model_name="m",le="0.01"} 50
+vllm:kv_cache_offload_time_seconds_bucket{model_name="m",le="0.02"} 95
+vllm:kv_cache_offload_time_seconds_bucket{model_name="m",le="+Inf"} 100
+vllm:kv_cache_offload_time_seconds_count{model_name="m"} 100
+vllm:kv_cache_offload_time_seconds_sum{model_name="m"} 0.8
+vllm:request_success_total{model_name="m",request_tag="team-search"} 200
+vllm:request_success_total{model_name="m",request_tag="team-rag"} 100
+`
+
+func TestParseVLLM_NVMePct(t *testing.T) {
+	pm := metrics.ParseText(sampleVLLMNVMeAndXfer)
+	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:8000", Online: true, Role: "prefill"}
+	parseVLLMMetrics(m, nil, counterState{}, pm)
+	if m.KVCacheUsageNVMePct != 42 {
+		t.Errorf("KVCacheUsageNVMePct = %f, want 42", m.KVCacheUsageNVMePct)
+	}
+}
+
+func TestParseVLLM_KVTransferP99_PrefillOnly(t *testing.T) {
+	pm := metrics.ParseText(sampleVLLMNVMeAndXfer)
+
+	prefill := &metrics.WorkerMetrics{Endpoint: "p", Online: true, Role: "prefill"}
+	parseVLLMMetrics(prefill, nil, counterState{}, pm)
+	if prefill.KVTransferP99Ms <= 0 {
+		t.Errorf("expected KVTransferP99Ms > 0 for prefill, got %f", prefill.KVTransferP99Ms)
+	}
+
+	decode := &metrics.WorkerMetrics{Endpoint: "d", Online: true, Role: "decode"}
+	parseVLLMMetrics(decode, nil, counterState{}, pm)
+	if decode.KVTransferP99Ms != 0 {
+		t.Errorf("expected KVTransferP99Ms == 0 for decode, got %f", decode.KVTransferP99Ms)
+	}
+}
+
+func TestParseVLLM_TenantReqs(t *testing.T) {
+	pm := metrics.ParseText(sampleVLLMNVMeAndXfer)
+	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:8000", Online: true, Role: "prefill"}
+	counters := parseVLLMMetrics(m, nil, counterState{}, pm)
+	if m.TenantReqs["team-search"] != 200 || m.TenantReqs["team-rag"] != 100 {
+		t.Errorf("unexpected TenantReqs: %v", m.TenantReqs)
+	}
+	if counters.tenantReqTotals["team-search"] != 200 {
+		t.Errorf("expected tenant counter snapshot, got %v", counters.tenantReqTotals)
+	}
+}
+
+func TestParseVLLM_TTFTLatencySnapshot(t *testing.T) {
+	pm := metrics.ParseText(sampleVLLMMetrics)
+	m := &metrics.WorkerMetrics{Endpoint: "p", Online: true, Role: "prefill"}
+	parseVLLMMetrics(m, nil, counterState{}, pm)
+	if m.TTFT.P50 == 0 || m.TTFT.P95 == 0 || m.TTFT.P99 == 0 {
+		t.Errorf("TTFT snapshot incomplete: %+v", m.TTFT)
+	}
+	if !(m.TTFT.P50 <= m.TTFT.P95 && m.TTFT.P95 <= m.TTFT.P99) {
+		t.Errorf("TTFT quantiles violate ordering: %+v", m.TTFT)
+	}
+	prev := 0.0
+	for i, v := range m.TTFT.CDFPoints {
+		if v < prev {
+			t.Errorf("CDFPoints not monotonic at %d: %f < %f", i, v, prev)
+		}
+		prev = v
+	}
+}

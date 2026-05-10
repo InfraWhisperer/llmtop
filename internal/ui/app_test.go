@@ -73,15 +73,18 @@ func testGPUs() []*metrics.GPUInfo {
 // refreshMsg, or the 'r' key handler which dereference them.
 func newTestModel() Model {
 	return Model{
-		version:     "0.1.0",
-		intervalSec: 2,
-		width:       120,
-		height:      40,
+		version:          "0.1.0",
+		intervalSec:      2,
+		width:            120,
+		height:           40,
+		alertMgr:         metrics.NewAlertManager(),
+		prevWorkerStates: make(map[string]workerSnapshot),
+		events:           metrics.NewEventRing(20),
 	}
 }
 
 func TestNewModel(t *testing.T) {
-	m := NewModel(nil, nil, "0.1.0", 2, "test-ctx")
+	m := NewModel(nil, nil, "0.1.0", 2, "test-ctx", metrics.DefaultAlertThresholds(), false, nil)
 
 	if m.version != "0.1.0" {
 		t.Errorf("expected version=0.1.0, got %s", m.version)
@@ -195,18 +198,18 @@ func TestViewSwitching(t *testing.T) {
 	m := newTestModel()
 	m.workers = testWorkers()
 
-	// d → detail (requires workers)
+	// d → overlay (requires workers)
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
 	model := updated.(Model)
-	if model.currentView != ViewDetail {
-		t.Errorf("expected ViewDetail after d, got %d", model.currentView)
+	if model.currentView != ViewOverlay {
+		t.Errorf("expected ViewOverlay after d, got %d", model.currentView)
 	}
 
-	// any key returns from detail to main
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	// esc returns from overlay to main
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEscape})
 	model = updated.(Model)
 	if model.currentView != ViewMain {
-		t.Errorf("expected ViewMain after escape from detail, got %d", model.currentView)
+		t.Errorf("expected ViewMain after esc from overlay, got %d", model.currentView)
 	}
 
 	// ? → help

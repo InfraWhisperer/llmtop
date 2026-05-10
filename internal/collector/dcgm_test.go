@@ -21,6 +21,15 @@ DCGM_FI_DEV_GPU_TEMP{gpu="1",UUID="GPU-bbb",modelName="NVIDIA H100 80GB HBM3",Ho
 # TYPE DCGM_FI_DEV_POWER_USAGE gauge
 DCGM_FI_DEV_POWER_USAGE{gpu="0",UUID="GPU-aaa",modelName="NVIDIA H100 80GB HBM3",Hostname="node1",container="nim-llm",namespace="nim",pod="pool3"} 118.344
 DCGM_FI_DEV_POWER_USAGE{gpu="1",UUID="GPU-bbb",modelName="NVIDIA H100 80GB HBM3",Hostname="node1"} 70.013
+# TYPE DCGM_FI_DEV_MEM_COPY_UTIL gauge
+DCGM_FI_DEV_MEM_COPY_UTIL{gpu="0",UUID="GPU-aaa",modelName="NVIDIA H100 80GB HBM3",Hostname="node1",container="nim-llm",namespace="nim",pod="pool3"} 58
+DCGM_FI_DEV_MEM_COPY_UTIL{gpu="1",UUID="GPU-bbb",modelName="NVIDIA H100 80GB HBM3",Hostname="node1"} 12
+# TYPE DCGM_FI_DEV_NVLINK_BANDWIDTH_TOTAL gauge
+DCGM_FI_DEV_NVLINK_BANDWIDTH_TOTAL{gpu="0",UUID="GPU-aaa",modelName="NVIDIA H100 80GB HBM3",Hostname="node1",container="nim-llm",namespace="nim",pod="pool3"} 88
+DCGM_FI_DEV_NVLINK_BANDWIDTH_TOTAL{gpu="1",UUID="GPU-bbb",modelName="NVIDIA H100 80GB HBM3",Hostname="node1"} 0
+# TYPE DCGM_FI_DEV_ECC_DBE_VOL_TOTAL gauge
+DCGM_FI_DEV_ECC_DBE_VOL_TOTAL{gpu="0",UUID="GPU-aaa",modelName="NVIDIA H100 80GB HBM3",Hostname="node1",container="nim-llm",namespace="nim",pod="pool3"} 0
+DCGM_FI_DEV_ECC_DBE_VOL_TOTAL{gpu="1",UUID="GPU-bbb",modelName="NVIDIA H100 80GB HBM3",Hostname="node1"} 3
 # TYPE DCGM_FI_DEV_SM_CLOCK gauge
 DCGM_FI_DEV_SM_CLOCK{gpu="0",UUID="GPU-aaa",modelName="NVIDIA H100 80GB HBM3",Hostname="node1",container="nim-llm",namespace="nim",pod="pool3"} 1980
 DCGM_FI_DEV_SM_CLOCK{gpu="1",UUID="GPU-bbb",modelName="NVIDIA H100 80GB HBM3",Hostname="node1"} 345
@@ -82,6 +91,18 @@ func TestParseDCGMMetrics(t *testing.T) {
 	if g0.Container != "nim-llm" {
 		t.Errorf("Container = %q, want nim-llm", g0.Container)
 	}
+	if g0.MemBWUtil != 58 {
+		t.Errorf("MemBWUtil = %f, want 58", g0.MemBWUtil)
+	}
+	if g0.NVLinkGBs != 88 {
+		t.Errorf("NVLinkGBs = %f, want 88", g0.NVLinkGBs)
+	}
+	if g0.ECCErrors != 0 {
+		t.Errorf("ECCErrors = %d, want 0", g0.ECCErrors)
+	}
+	if g0.LastScrape.IsZero() {
+		t.Error("LastScrape should be set after parsing")
+	}
 
 	// GPU 1 — unallocated
 	g1 := gpus[gpuKey{Hostname: "node1", Index: 1}]
@@ -99,6 +120,12 @@ func TestParseDCGMMetrics(t *testing.T) {
 	}
 	if g1.TempC != 25 {
 		t.Errorf("TempC = %f, want 25", g1.TempC)
+	}
+	if g1.MemBWUtil != 12 {
+		t.Errorf("MemBWUtil = %f, want 12", g1.MemBWUtil)
+	}
+	if g1.ECCErrors != 3 {
+		t.Errorf("ECCErrors = %d, want 3", g1.ECCErrors)
 	}
 }
 

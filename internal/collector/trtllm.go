@@ -54,21 +54,11 @@ func parseTRTLLMMetrics(m *metrics.WorkerMetrics, _ *metrics.WorkerMetrics, _ co
 		m.CacheHitRatePct = v * 100
 	}
 
-	// TTFT histogram (seconds → ms)
-	if p50, ok := pm.GetHistogramQuantileAny("trtllm_time_to_first_token_seconds", 0.50); ok {
-		m.TTFT_P50 = p50 * 1000
-	}
-	if p99, ok := pm.GetHistogramQuantileAny("trtllm_time_to_first_token_seconds", 0.99); ok {
-		m.TTFT_P99 = p99 * 1000
-	}
-
-	// Inter-token latency histogram (seconds → ms)
-	if p50, ok := pm.GetHistogramQuantileAny("trtllm_time_per_output_token_seconds", 0.50); ok {
-		m.ITL_P50 = p50 * 1000
-	}
-	if p99, ok := pm.GetHistogramQuantileAny("trtllm_time_per_output_token_seconds", 0.99); ok {
-		m.ITL_P99 = p99 * 1000
-	}
+	// TTFT/ITL: populate scalar fields and LatencySnapshots in one pass.
+	populateLatency(m, pm,
+		"trtllm_time_to_first_token_seconds",
+		[]string{"trtllm_time_per_output_token_seconds"},
+	)
 
 	// Request success counter — no direct running/waiting gauges in trtllm-serve,
 	// but queue time histogram presence indicates requests are being queued.

@@ -53,21 +53,11 @@ func parseSGLangMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, p
 		m.CacheHitRatePct = v * 100
 	}
 
-	// Time to first token histogram (seconds → ms)
-	if p50, ok := pm.GetHistogramQuantileAny("sglang:time_to_first_token_seconds", 0.50); ok {
-		m.TTFT_P50 = p50 * 1000
-	}
-	if p99, ok := pm.GetHistogramQuantileAny("sglang:time_to_first_token_seconds", 0.99); ok {
-		m.TTFT_P99 = p99 * 1000
-	}
-
-	// Inter-token latency histogram (seconds → ms)
-	if p50, ok := pm.GetHistogramQuantileAny("sglang:time_per_output_token_seconds", 0.50); ok {
-		m.ITL_P50 = p50 * 1000
-	}
-	if p99, ok := pm.GetHistogramQuantileAny("sglang:time_per_output_token_seconds", 0.99); ok {
-		m.ITL_P99 = p99 * 1000
-	}
+	// TTFT/ITL: populate scalar fields and LatencySnapshots in one pass.
+	populateLatency(m, pm,
+		"sglang:time_to_first_token_seconds",
+		[]string{"sglang:time_per_output_token_seconds"},
+	)
 
 	// Token throughput rates
 	if prev != nil && prev.Online {

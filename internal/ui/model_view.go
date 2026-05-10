@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/InfraWhisperer/llmtop/internal/metrics"
 )
 
@@ -79,7 +78,7 @@ func mgModelWidth(termWidth int) int {
 
 // RenderModelHeader renders the fleet header for the model-grouped view.
 func RenderModelHeader(groups []metrics.ModelGroup, version string, intervalSec int, width int) string {
-	title := StyleHeaderTitle.Render("llmtop " + version + " — Models")
+	title := StyleHeaderTitle.Render(" llmtop " + version + " — Models")
 
 	totalWorkers := 0
 	for _, g := range groups {
@@ -96,28 +95,16 @@ func RenderModelHeader(groups []metrics.ModelGroup, version string, intervalSec 
 	tokStr := StyleHeaderValue.Render(fmt.Sprintf("%.0f tok/s", totalTok))
 
 	interval := StyleHeaderStat.Render(fmt.Sprintf("↻ %ds", intervalSec))
-	dot := StyleHeaderDot.Render("·")
+	dot := StyleHeaderDot.Render(" · ")
 
-	parts := []string{
-		" " + title,
-		dot,
-		countStr,
-		dot,
-		tokStr,
-		dot,
-		interval + " ",
-	}
+	parts := []string{title, dot, countStr, dot, tokStr, dot, interval}
 
-	header := ""
+	var header strings.Builder
 	for _, p := range parts {
-		header += p + " "
+		header.WriteString(p)
 	}
 
-	return lipgloss.NewStyle().
-		Width(width).
-		Background(colorDark).
-		Foreground(colorWhite).
-		Render(header)
+	return renderHeaderBar(header.String(), width)
 }
 
 // RenderModelTable renders the model-grouped metrics table.

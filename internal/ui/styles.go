@@ -1,6 +1,19 @@
 package ui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"os"
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
+)
+
+func init() {
+	// Respect NO_COLOR convention: https://no-color.org/
+	if _, ok := os.LookupEnv("NO_COLOR"); ok {
+		lipgloss.SetColorProfile(termenv.Ascii)
+	}
+}
 
 var (
 	// Color palette
@@ -17,26 +30,41 @@ var (
 	colorSurface = lipgloss.Color("#313244")
 	colorSubtext = lipgloss.Color("#6C7086")
 
+	// Role colors
+	colorRolePrefill = lipgloss.Color("#79c0ff")
+	colorRoleDecode  = lipgloss.Color("#3fb950")
+	colorRoleMono    = lipgloss.Color("#b388ff")
+
+	// KV bar colors
+	colorKVBarLow  = lipgloss.Color("#58a6ff") // <75%
+	colorKVBarMid  = lipgloss.Color("#e3b341") // 75-89%
+	colorKVBarHigh = lipgloss.Color("#f85149") // ≥90%
+
+	// Pool separator color
+	colorSeparator = lipgloss.Color("#484f58")
+
 	// Header styles
 	StyleHeaderBar = lipgloss.NewStyle().
 			Background(colorDark).
-			Foreground(colorWhite).
-			Bold(true).
-			Padding(0, 1)
+			Foreground(colorWhite)
 
 	StyleHeaderTitle = lipgloss.NewStyle().
 				Foreground(colorCyan).
-				Bold(true)
+				Bold(true).
+				Inherit(StyleHeaderBar)
 
 	StyleHeaderStat = lipgloss.NewStyle().
-			Foreground(colorWhite)
+			Foreground(colorWhite).
+			Inherit(StyleHeaderBar)
 
 	StyleHeaderValue = lipgloss.NewStyle().
 				Foreground(colorGreen).
-				Bold(true)
+				Bold(true).
+				Inherit(StyleHeaderBar)
 
 	StyleHeaderDot = lipgloss.NewStyle().
-			Foreground(colorSubtext)
+			Foreground(colorSubtext).
+			Inherit(StyleHeaderBar)
 
 	// Table styles
 	StyleTableHeader = lipgloss.NewStyle().
@@ -176,6 +204,36 @@ var (
 	StyleSortIndicator = lipgloss.NewStyle().
 				Foreground(colorYellow).
 				Bold(true)
+
+	// Pool separator row
+	StylePoolSeparator = lipgloss.NewStyle().
+				Foreground(colorSeparator).
+				Faint(true)
+
+	// Role badge styles
+	StyleRolePrefill = lipgloss.NewStyle().
+				Foreground(colorRolePrefill).
+				Bold(true)
+
+	StyleRoleDecode = lipgloss.NewStyle().
+			Foreground(colorRoleDecode).
+			Bold(true)
+
+	StyleRoleMono = lipgloss.NewStyle().
+			Foreground(colorRoleMono).
+			Bold(true)
+
+	// Header amber pill
+	StyleHeaderAmber = lipgloss.NewStyle().
+				Foreground(colorYellow).
+				Bold(true).
+				Inherit(StyleHeaderBar)
+
+	// Header red pill
+	StyleHeaderRed = lipgloss.NewStyle().
+			Foreground(colorRed).
+			Bold(true).
+			Inherit(StyleHeaderBar)
 )
 
 // KVCacheStyle returns the appropriate style based on KV cache usage percentage.
@@ -236,4 +294,48 @@ func GPUTempStyle(c float64) lipgloss.Style {
 // VRAMStyle returns the appropriate style based on VRAM usage percentage.
 func VRAMStyle(pct float64) lipgloss.Style {
 	return KVCacheStyle(pct)
+}
+
+// RoleStyle returns the appropriate style for a worker role.
+func RoleStyle(role string) lipgloss.Style {
+	switch role {
+	case "prefill":
+		return StyleRolePrefill
+	case "decode":
+		return StyleRoleDecode
+	default:
+		return StyleRoleMono
+	}
+}
+
+// KVBarColor returns the lipgloss color for a KV cache bar segment.
+func KVBarColor(pct float64) lipgloss.Color {
+	if pct >= 90 {
+		return colorKVBarHigh
+	}
+	if pct >= 75 {
+		return colorKVBarMid
+	}
+	return colorKVBarLow
+}
+
+// RenderKVBar renders an inline bar of width chars representing a percentage (0-100).
+func RenderKVBar(pct float64, width int) string {
+	if pct <= 0 {
+		return lipgloss.NewStyle().Foreground(colorSubtext).Render(strings.Repeat("─", width))
+	}
+	filled := int(pct / 100 * float64(width))
+	if filled > width {
+		filled = width
+	}
+	if filled < 1 && pct > 0 {
+		filled = 1
+	}
+	empty := width - filled
+	color := KVBarColor(pct)
+	bar := lipgloss.NewStyle().Foreground(color).Render(strings.Repeat("█", filled))
+	if empty > 0 {
+		bar += lipgloss.NewStyle().Foreground(colorSurface).Render(strings.Repeat("░", empty))
+	}
+	return bar
 }

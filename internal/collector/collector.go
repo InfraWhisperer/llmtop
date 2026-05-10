@@ -50,6 +50,8 @@ type WorkerConfig struct {
 	Label       string
 	Backend     metrics.Backend // hint; auto-detected if Unknown
 	MetricsPath string
+	Role        string                                    // "prefill", "decode", or "mono"
+	NodeName    string                                    // K8s node running the pod
 	FetchFunc   func(ctx context.Context) (string, error) // optional: custom fetcher (e.g., K8s API proxy)
 }
 
@@ -63,10 +65,16 @@ func New(configs []WorkerConfig, interval time.Duration) *Collector {
 		interval: interval,
 	}
 	for _, cfg := range configs {
+		role := cfg.Role
+		if role == "" {
+			role = "mono"
+		}
 		m := &metrics.WorkerMetrics{
 			Endpoint: cfg.Endpoint,
 			Label:    cfg.Label,
 			Backend:  cfg.Backend,
+			Role:     role,
+			NodeName: cfg.NodeName,
 			Online:   false,
 		}
 		mp := cfg.MetricsPath
@@ -162,10 +170,16 @@ func (c *Collector) AddWorker(cfg WorkerConfig) {
 	if _, exists := c.workers[cfg.Endpoint]; exists {
 		return
 	}
+	role := cfg.Role
+	if role == "" {
+		role = "mono"
+	}
 	m := &metrics.WorkerMetrics{
 		Endpoint: cfg.Endpoint,
 		Label:    cfg.Label,
 		Backend:  cfg.Backend,
+		Role:     role,
+		NodeName: cfg.NodeName,
 		Online:   false,
 	}
 	mp := cfg.MetricsPath
@@ -257,6 +271,8 @@ func (c *Collector) pollWorker(ctx context.Context, endpoint string) {
 			Label:     current.Label,
 			Backend:   current.Backend,
 			ModelName: current.ModelName,
+			Role:      current.Role,
+			NodeName:  current.NodeName,
 			Online:    false,
 			LastSeen:  current.LastSeen,
 		}
@@ -307,6 +323,8 @@ func parseWorkerMetrics(current, prev *metrics.WorkerMetrics, prevCounters count
 		Endpoint: current.Endpoint,
 		Label:    current.Label,
 		Backend:  current.Backend,
+		Role:     current.Role,
+		NodeName: current.NodeName,
 		Online:   true,
 		LastSeen: time.Now(),
 	}
