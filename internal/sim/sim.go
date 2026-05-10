@@ -190,7 +190,7 @@ func (s *Simulator) Start() error {
 				return
 			}
 			rw.Header().Set("Content-Type", "text/plain")
-			fmt.Fprint(rw, RenderWorkerMetrics(w))
+			_, _ = fmt.Fprint(rw, RenderWorkerMetrics(w))
 		})
 
 		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", w.Port))
