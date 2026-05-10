@@ -381,12 +381,6 @@ func renderWorkerRowWithGutter(w *metrics.WorkerMetrics, selected bool, epW, mod
 	return renderWorkerRowInner(w, selected, epW, modelW, gutter)
 }
 
-func renderWorkerRow(w *metrics.WorkerMetrics, selected bool, epW, modelW int) string {
-	// Backwards-compat wrapper: blank gutter (2 spaces) for callers without
-	// V3/V8 wiring. Used by tests that haven't been updated yet.
-	return renderWorkerRowInner(w, selected, epW, modelW, "  ")
-}
-
 func renderWorkerRowInner(w *metrics.WorkerMetrics, selected bool, epW, modelW int, gutter string) string {
 	var dot string
 	if w.Online {

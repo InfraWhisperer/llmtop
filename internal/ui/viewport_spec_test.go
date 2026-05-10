@@ -121,7 +121,7 @@ func TestClampViewport_StartLessOrEqualEndAlways(t *testing.T) {
 				if end-start > vis && vis > 0 {
 					// Allow window=total when visibleRows >= total (size-vis bound only when
 					// not capped by total).
-					if !(total <= vis && end-start == total) {
+					if total > vis || end-start != total {
 						t.Errorf("window too large for total=%d vis=%d off=%d → size %d", total, vis, off, end-start)
 					}
 				}

@@ -1159,11 +1159,6 @@ func (m Model) handleAlertsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.currentView = ViewEvictionTimeline
 				return m, nil
 			}
-			if a.Title != "" && (strings.Contains(strings.ToLower(a.Title), "ttft") ||
-				strings.Contains(strings.ToLower(a.Title), "kv") ||
-				strings.Contains(strings.ToLower(a.Title), "scrape")) {
-				// fallthrough: still attempt source-worker jump.
-			}
 			for i, w := range m.workers {
 				if w.Label == a.Source || strings.Contains(w.Label, a.Source) {
 					m.selectedIdx = i

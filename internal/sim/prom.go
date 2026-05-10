@@ -108,11 +108,11 @@ func renderHistogram(name, labels string, p99Seconds float64, totalCount int64) 
 			fraction = ratio * 0.85
 		}
 		cumulative = fraction * count
-		sb.WriteString(fmt.Sprintf("%s_bucket{%s,le=\"%.1f\"} %.0f\n", name, labels, le, cumulative))
+		fmt.Fprintf(&sb, "%s_bucket{%s,le=\"%.1f\"} %.0f\n", name, labels, le, cumulative)
 	}
-	sb.WriteString(fmt.Sprintf("%s_bucket{%s,le=\"+Inf\"} %.0f\n", name, labels, count))
-	sb.WriteString(fmt.Sprintf("%s_sum{%s} %g\n", name, labels, p99Seconds*0.6*count))
-	sb.WriteString(fmt.Sprintf("%s_count{%s} %.0f\n", name, labels, count))
+	fmt.Fprintf(&sb, "%s_bucket{%s,le=\"+Inf\"} %.0f\n", name, labels, count)
+	fmt.Fprintf(&sb, "%s_sum{%s} %g\n", name, labels, p99Seconds*0.6*count)
+	fmt.Fprintf(&sb, "%s_count{%s} %.0f\n", name, labels, count)
 
 	return sb.String()
 }

@@ -64,16 +64,6 @@ func RenderGPUHeader(summary metrics.GPUSummary, version string, intervalSec int
 	return renderHeaderBar(header.String(), width)
 }
 
-func gpuPodLabel(g *metrics.GPUInfo) string {
-	if g.Pod == "" {
-		return "-"
-	}
-	if g.Namespace != "" {
-		return g.Namespace + "/" + g.Pod
-	}
-	return g.Pod
-}
-
 // utilColor returns the lipgloss color for a GPU utilization percentage.
 func utilColor(pct float64) lipgloss.Color {
 	if pct >= 90 {

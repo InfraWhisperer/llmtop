@@ -34,7 +34,7 @@ func FakeK8sServer(workers []*WorkerState) http.Handler {
 	// Health endpoint
 	mux.HandleFunc("/api", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"kind":"APIVersions","versions":["v1"]}`)
+		_, _ = fmt.Fprint(w, `{"kind":"APIVersions","versions":["v1"]}`)
 	})
 
 	return mux
@@ -132,7 +132,7 @@ func renderPodList(w http.ResponseWriter, workers []*WorkerState) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	_ = json.NewEncoder(w).Encode(result)
 }
 
 func renderProxyMetrics(w http.ResponseWriter, _ *http.Request, path string, workers []*WorkerState) {
@@ -149,7 +149,7 @@ func renderProxyMetrics(w http.ResponseWriter, _ *http.Request, path string, wor
 						return
 					}
 					w.Header().Set("Content-Type", "text/plain")
-					fmt.Fprint(w, RenderWorkerMetrics(ws))
+					_, _ = fmt.Fprint(w, RenderWorkerMetrics(ws))
 					return
 				}
 			}
@@ -160,5 +160,5 @@ func renderProxyMetrics(w http.ResponseWriter, _ *http.Request, path string, wor
 
 func renderEventList(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprint(w, `{"kind":"EventList","apiVersion":"v1","items":[]}`)
+	_, _ = fmt.Fprint(w, `{"kind":"EventList","apiVersion":"v1","items":[]}`)
 }

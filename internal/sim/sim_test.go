@@ -68,7 +68,7 @@ func TestWorkerMetricsEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /metrics failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
@@ -115,7 +115,7 @@ func TestErrorWorkerReturns503(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /metrics failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 503 {
 		t.Errorf("expected 503 for error worker, got %d", resp.StatusCode)
@@ -136,7 +136,7 @@ func TestDCGMMetricsEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET DCGM /metrics failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(resp.Body)
 	text := string(body)
@@ -170,7 +170,7 @@ func TestK8sPodListEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET pods failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)

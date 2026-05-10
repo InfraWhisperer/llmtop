@@ -285,7 +285,7 @@ func evalRule(rule AlertRule, state *AlertState, t AlertThresholds) []*Alert {
 				alerts = append(alerts, &Alert{
 					Severity: AlertCritical,
 					Title:    fmt.Sprintf("Scrape failure: %s — all metrics Err", w.Label),
-					Detail:   fmt.Sprintf("vLLM /metrics unreachable · pod Running but port closed"),
+					Detail:   "vLLM /metrics unreachable · pod Running but port closed",
 					Source:         w.Label,
 					SourceEndpoint: w.Endpoint,
 					FiredAt:        time.Now(),
@@ -376,9 +376,10 @@ func evalRule(rule AlertRule, state *AlertState, t AlertThresholds) []*Alert {
 					continue
 				}
 				tok := w.PromptTokPerSec + w.GenTokPerSec
-				if w.Role == "prefill" {
+				switch w.Role {
+				case "prefill":
 					prefillTok += tok
-				} else if w.Role == "decode" {
+				case "decode":
 					decodeTok += tok
 				}
 			}

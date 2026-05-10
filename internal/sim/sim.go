@@ -205,7 +205,7 @@ func (s *Simulator) Start() error {
 		srv := &http.Server{Handler: mux}
 		s.workerServers = append(s.workerServers, srv)
 		s.workerListeners = append(s.workerListeners, ln)
-		go srv.Serve(ln)
+		go func() { _ = srv.Serve(ln) }()
 	}
 
 	// Start DCGM server
@@ -218,7 +218,7 @@ func (s *Simulator) Start() error {
 			gpuList = append(gpuList, g)
 		}
 		w.Header().Set("Content-Type", "text/plain")
-		fmt.Fprint(w, RenderDCGMMetrics(gpuList))
+		_, _ = fmt.Fprint(w, RenderDCGMMetrics(gpuList))
 	})
 
 	dcgmLn, err := net.Listen("tcp", fmt.Sprintf(":%d", s.cfg.DCGMPort))
@@ -231,7 +231,7 @@ func (s *Simulator) Start() error {
 	}
 	s.dcgmServer = &http.Server{Handler: dcgmMux}
 	s.dcgmListener = dcgmLn
-	go s.dcgmServer.Serve(dcgmLn)
+	go func() { _ = s.dcgmServer.Serve(dcgmLn) }()
 
 	// Start fake K8s API server
 	k8sHandler := FakeK8sServer(workerList)
@@ -245,7 +245,7 @@ func (s *Simulator) Start() error {
 	}
 	s.k8sServer = &http.Server{Handler: k8sHandler}
 	s.k8sListener = k8sLn
-	go s.k8sServer.Serve(k8sLn)
+	go func() { _ = s.k8sServer.Serve(k8sLn) }()
 
 	// Start tick loop
 	go s.tickLoop(ctx)
@@ -261,13 +261,13 @@ func (s *Simulator) Stop() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	for _, srv := range s.workerServers {
-		srv.Shutdown(ctx)
+		_ = srv.Shutdown(ctx)
 	}
 	if s.dcgmServer != nil {
-		s.dcgmServer.Shutdown(ctx)
+		_ = s.dcgmServer.Shutdown(ctx)
 	}
 	if s.k8sServer != nil {
-		s.k8sServer.Shutdown(ctx)
+		_ = s.k8sServer.Shutdown(ctx)
 	}
 }
 

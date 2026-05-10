@@ -124,10 +124,9 @@ func TestComputeCDFPoints_MonotonicNonDecreasing(t *testing.T) {
 func TestComputeCDFPoints_TenElementArray(t *testing.T) {
 	pm := parsePromText(t, vllmTTFTFixture())
 	buckets, total, _ := pm.GetHistogramBucketsAny("vllm:time_to_first_token_seconds")
-	got := metrics.ComputeCDFPoints(buckets, total, 5000)
-	if len(got) != 10 {
-		t.Fatalf("expected 10-element array, got %d", len(got))
-	}
+	// Type-system check: ComputeCDFPoints returns [10]float64; the assignment
+	// would not compile if the spec changed the array length.
+	var _ [10]float64 = metrics.ComputeCDFPoints(buckets, total, 5000)
 }
 
 func TestComputeCDFPoints_LastElementBoundedByOne(t *testing.T) {
