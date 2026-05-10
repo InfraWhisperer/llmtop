@@ -21,3 +21,6 @@ coverage.out
 superpowers/
 plans/
 tasks/
+
+# Working notes (agent-session artifacts, not for public repo)
+docs/notes/
