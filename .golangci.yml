@@ -1,0 +1,132 @@
+# golangci-lint config for llmtop.
+#
+# Goal: a stable, predictable lint baseline that won't silently bloat when the
+# tool ships new defaults. Everything we want enabled is listed explicitly.
+#
+# Enabled linters:
+#   - errcheck      catch unchecked errors (with narrow exclusions for I/O to
+#                   in-memory writers like strings.Builder/bytes.Buffer)
+#   - govet         standard vet passes
+#   - staticcheck   SA*/S*/ST*/QF* — bug, simplification, style, quick-fix checks
+#                   (gosimple is folded into staticcheck in golangci-lint v2)
+#   - unused        dead code
+#   - ineffassign   ineffective assignments
+#   - unconvert     redundant type conversions
+#   - misspell      typos in comments / strings
+#   - gosec         security scanner; we exclude the noisy rules that fire on
+#                   simulator HTTP servers and dev-mode endpoints
+#   - modernize     gopls modernization hints (intrange, slices, maps, etc.)
+#
+# Anything not in `enable` is off. To turn something on, add it explicitly.
+
+version: "2"
+
+run:
+  timeout: 5m
+  # Run all builds, including the nokubernetes build tag we ship.
+  build-tags:
+    - nokubernetes
+
+output:
+  formats:
+    text:
+      path: stdout
+      colors: true
+      print-issued-lines: true
+      print-linter-name: true
+  sort-order:
+    - linter
+    - file
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - ineffassign
+    - unconvert
+    - misspell
+    - gosec
+    - modernize
+
+  settings:
+    errcheck:
+      # Don't flag writes to in-memory buffers — Write on strings.Builder /
+      # bytes.Buffer cannot fail, and checking the error adds noise without
+      # surfacing real bugs.
+      exclude-functions:
+        - (*strings.Builder).WriteString
+        - (*strings.Builder).WriteRune
+        - (*strings.Builder).WriteByte
+        - (*strings.Builder).Write
+        - (*bytes.Buffer).WriteString
+        - (*bytes.Buffer).WriteRune
+        - (*bytes.Buffer).WriteByte
+        - (*bytes.Buffer).Write
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+
+    staticcheck:
+      # Enable the full v2 check families: SA (bugs), S (simplifications),
+      # ST (style), QF (quick-fix). Explicit so an upgrade can't quietly add
+      # a new family.
+      checks:
+        - "SA*"
+        - "S1*"
+        - "ST*"
+        - "QF*"
+
+    gosec:
+      excludes:
+        # G104 dup of errcheck and noisier; let errcheck handle unchecked errs.
+        - G104
+        # G114 (http.ListenAndServe w/o timeouts): sim-mode HTTP server is
+        # local-only and short-lived. Real prod servers belong elsewhere.
+        - G114
+        # G204 (subprocess w/ variadic args): demo/sim tooling shells out;
+        # inputs are not user-controlled.
+        - G204
+        # G304 (file path provided as taint input): CLI tools legitimately
+        # take user-supplied paths.
+        - G304
+        # G404 (weak rand): the simulator uses math/rand for synthetic load.
+        - G404
+
+    misspell:
+      locale: US
+
+    govet:
+      enable-all: true
+      disable:
+        # fieldalignment is noisy and not load-bearing for this codebase.
+        - fieldalignment
+        # shadow is opinionated; staticcheck/unused cover the cases we care about.
+        - shadow
+
+  exclusions:
+    generated: lax
+    presets:
+      - common-false-positives
+      - legacy
+    rules:
+      # Test files often (de)allocate noise, ignore returns, and build stub
+      # structs. Loosen the strictest checks there.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - unused
+      # Simulator package: synthetic load generation by design.
+      - path: cmd/llmsim/
+        linters:
+          - gosec
+      - path: internal/sim/
+        linters:
+          - gosec
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
