@@ -86,7 +86,7 @@ func TestCaptureFrame_WorkerHistoriesDropped(t *testing.T) {
 
 func TestRingBuffer_AtNewest(t *testing.T) {
 	r := NewRingBuffer(10)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		f := FrameSnapshot{At: time.Unix(int64(i), 0)}
 		r.Push(f)
 	}
@@ -104,7 +104,7 @@ func TestRingBuffer_AtNewest(t *testing.T) {
 
 func TestRingBuffer_AtOldest(t *testing.T) {
 	r := NewRingBuffer(10)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		r.Push(FrameSnapshot{At: time.Unix(int64(i), 0)})
 	}
 	got, ok := r.At(4)
@@ -118,7 +118,7 @@ func TestRingBuffer_AtOldest(t *testing.T) {
 
 func TestRingBuffer_AtOutOfBounds(t *testing.T) {
 	r := NewRingBuffer(10)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		r.Push(FrameSnapshot{At: time.Unix(int64(i), 0)})
 	}
 	if _, ok := r.At(5); ok {
@@ -131,7 +131,7 @@ func TestRingBuffer_AtOutOfBounds(t *testing.T) {
 
 func TestRingBuffer_CircularOverwrite(t *testing.T) {
 	r := NewRingBuffer(3)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		r.Push(FrameSnapshot{At: time.Unix(int64(i), 0)})
 	}
 	if r.Len() != 3 {
@@ -174,7 +174,7 @@ func TestRingBuffer_NewRingBufferCapZero(t *testing.T) {
 
 func TestRingBuffer_SparklineFor(t *testing.T) {
 	r := NewRingBuffer(100)
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		w := mkWorker("http://w1", float64(100+i))
 		r.Push(CaptureFrame([]*WorkerMetrics{w}, FleetSummary{}, nil))
 	}
@@ -190,7 +190,7 @@ func TestRingBuffer_SparklineFor(t *testing.T) {
 
 func TestRingBuffer_SparklineFor_MissingEndpoint(t *testing.T) {
 	r := NewRingBuffer(10)
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		r.Push(CaptureFrame([]*WorkerMetrics{mkWorker("http://w1", 100)}, FleetSummary{}, nil))
 	}
 	if got := r.SparklineFor("http://nope", 60); got != nil {
@@ -216,7 +216,7 @@ func TestRingBuffer_SparklineFor_NonPositiveN(t *testing.T) {
 func TestRingBuffer_ExtractTimelineWindow_Centered(t *testing.T) {
 	r := NewRingBuffer(200)
 	base := time.Unix(0, 0)
-	for i := 0; i < 121; i++ {
+	for i := range 121 {
 		f := FrameSnapshot{At: base.Add(time.Duration(i) * time.Second)}
 		r.Push(f)
 	}
@@ -241,7 +241,7 @@ func TestRingBuffer_ExtractTimelineWindow_Centered(t *testing.T) {
 func TestRingBuffer_ExtractTimelineWindow_OutsideRange(t *testing.T) {
 	r := NewRingBuffer(50)
 	base := time.Unix(1000, 0)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		r.Push(FrameSnapshot{At: base.Add(time.Duration(i) * time.Second)})
 	}
 	if got := r.ExtractTimelineWindow(base.Add(-time.Hour), 5); got != nil {
@@ -256,7 +256,7 @@ func TestRingBuffer_ExtractTimelineWindow_TruncatedLeft(t *testing.T) {
 	r := NewRingBuffer(200)
 	base := time.Unix(0, 0)
 	// Push 71 frames; target on frame 10 — only 10 frames before, 60 after = 71 total.
-	for i := 0; i < 71; i++ {
+	for i := range 71 {
 		r.Push(FrameSnapshot{At: base.Add(time.Duration(i) * time.Second)})
 	}
 	target := base.Add(10 * time.Second)
@@ -276,7 +276,7 @@ func TestRingBuffer_ExtractTimelineWindow_Empty(t *testing.T) {
 func TestRingBuffer_ConcurrentPushAt(t *testing.T) {
 	r := NewRingBuffer(100)
 	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -285,7 +285,7 @@ func TestRingBuffer_ConcurrentPushAt(t *testing.T) {
 			}
 		}(i)
 	}
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

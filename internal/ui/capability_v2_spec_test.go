@@ -8,6 +8,8 @@
 //   - CapabilityFor(BackendOllama).TTFT == CapabilityNone.
 //   - CapabilityFor(BackendVLLM).PrefixHit == CapabilityPartial.
 //   - CapabilityFor round-trip: every entry in KnownCapabilities is returned by CapabilityFor.
+//   - Specific cells (SGLang/LMCache/TGI/LiteLLM/llama.cpp/TRT-LLM/Unknown)
+//     are locked individually — those drive routing/observability advice.
 //   - RenderCapabilityMatrix non-empty for non-empty detected slice.
 //   - RenderCapabilityMatrix with detected=nil contains "no workers detected".
 
@@ -76,6 +78,108 @@ func TestCapabilityFor_RoundTrip_KnownEntriesRetrievable(t *testing.T) {
 		if got.Backend != entry.Backend {
 			t.Errorf("KnownCapabilities[%d]: CapabilityFor(%v) returned Backend=%v",
 				i, entry.Backend, got.Backend)
+		}
+	}
+}
+
+// ─── Specific cells — V11 correctness ────────────────────────────────────────
+// These pins lock the matrix entries that drive routing/observability advice
+// in the UI. A regression in any of them silently lies to the user.
+
+func TestCapabilityFor_SGLang_PrefixHit_Full(t *testing.T) {
+	got := ui.CapabilityFor(metrics.BackendSGLang)
+	if got.PrefixHit != ui.CapabilityFull {
+		t.Errorf("SGLang.PrefixHit should be Full (SGLang emits sgl:cache_hit_rate), got %v", got.PrefixHit)
+	}
+}
+
+func TestCapabilityFor_LMCache_KVNVMe_Full(t *testing.T) {
+	got := ui.CapabilityFor(metrics.BackendLMCache)
+	if got.KVNVMe != ui.CapabilityFull {
+		t.Errorf("LMCache.KVNVMe should be Full (NVMe is LMCache's tier-3), got %v", got.KVNVMe)
+	}
+}
+
+func TestCapabilityFor_LMCache_TTFT_None(t *testing.T) {
+	got := ui.CapabilityFor(metrics.BackendLMCache)
+	if got.TTFT != ui.CapabilityNone {
+		t.Errorf("LMCache.TTFT should be None (transport-layer only, no request latency), got %v", got.TTFT)
+	}
+}
+
+func TestCapabilityFor_TGI_PrefixHit_None(t *testing.T) {
+	got := ui.CapabilityFor(metrics.BackendTGI)
+	if got.PrefixHit != ui.CapabilityNone {
+		t.Errorf("TGI.PrefixHit should be None (no prefix-cache exposure), got %v", got.PrefixHit)
+	}
+}
+
+func TestCapabilityFor_LiteLLM_Tenants_Full(t *testing.T) {
+	got := ui.CapabilityFor(metrics.BackendLiteLLM)
+	if got.Tenants != ui.CapabilityFull {
+		t.Errorf("LiteLLM.Tenants should be Full (router-level tenant labels), got %v", got.Tenants)
+	}
+}
+
+func TestCapabilityFor_LiteLLM_KVGPU_None(t *testing.T) {
+	got := ui.CapabilityFor(metrics.BackendLiteLLM)
+	if got.KVGPU != ui.CapabilityNone {
+		t.Errorf("LiteLLM.KVGPU should be None (proxy, no engine internals), got %v", got.KVGPU)
+	}
+}
+
+func TestCapabilityFor_LlamaCpp_KVCPU_Full(t *testing.T) {
+	got := ui.CapabilityFor(metrics.BackendLlamaCpp)
+	if got.KVCPU != ui.CapabilityFull {
+		t.Errorf("llama.cpp.KVCPU should be Full (CPU-bound by design), got %v", got.KVCPU)
+	}
+}
+
+func TestCapabilityFor_LlamaCpp_KVGPU_None(t *testing.T) {
+	got := ui.CapabilityFor(metrics.BackendLlamaCpp)
+	if got.KVGPU != ui.CapabilityNone {
+		t.Errorf("llama.cpp.KVGPU should be None (no HBM exposure), got %v", got.KVGPU)
+	}
+}
+
+func TestCapabilityFor_LlamaCpp_DCGM_None(t *testing.T) {
+	got := ui.CapabilityFor(metrics.BackendLlamaCpp)
+	if got.DCGM != ui.CapabilityNone {
+		t.Errorf("llama.cpp.DCGM should be None (no GPU surface), got %v", got.DCGM)
+	}
+}
+
+func TestCapabilityFor_TRTLLM_PrefixHit_Partial(t *testing.T) {
+	got := ui.CapabilityFor(metrics.BackendTRTLLM)
+	if got.PrefixHit != ui.CapabilityPartial {
+		t.Errorf("TRT-LLM.PrefixHit should be Partial (requires KV reuse plugin), got %v", got.PrefixHit)
+	}
+}
+
+func TestCapabilityFor_VLLM_DCGM_Full(t *testing.T) {
+	got := ui.CapabilityFor(metrics.BackendVLLM)
+	if got.DCGM != ui.CapabilityFull {
+		t.Errorf("vLLM.DCGM should be Full, got %v", got.DCGM)
+	}
+}
+
+func TestCapabilityFor_Unknown_AllNone(t *testing.T) {
+	got := ui.CapabilityFor(metrics.BackendUnknown)
+	cells := map[string]ui.CapabilityLevel{
+		"KVGPU":     got.KVGPU,
+		"KVCPU":     got.KVCPU,
+		"KVNVMe":    got.KVNVMe,
+		"TTFT":      got.TTFT,
+		"ITL":       got.ITL,
+		"PrefixHit": got.PrefixHit,
+		"Tenants":   got.Tenants,
+		"XferP99":   got.XferP99,
+		"DCGM":      got.DCGM,
+		"Roles":     got.Roles,
+	}
+	for name, lvl := range cells {
+		if lvl != ui.CapabilityNone {
+			t.Errorf("Unknown.%s should be None, got %v", name, lvl)
 		}
 	}
 }

@@ -30,7 +30,7 @@ func TestCollectorConcurrentAddRemove(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			c.PollNow(ctx)
 		}
 	}()
@@ -39,7 +39,7 @@ func TestCollectorConcurrentAddRemove(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			ep := fmt.Sprintf("http://localhost:%d", 9000+i)
 			c.AddWorker(WorkerConfig{Endpoint: ep, Backend: metrics.BackendVLLM})
 			c.RemoveWorker(ep)
@@ -50,7 +50,7 @@ func TestCollectorConcurrentAddRemove(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			_ = c.GetAll()
 			_ = c.Endpoints()
 		}

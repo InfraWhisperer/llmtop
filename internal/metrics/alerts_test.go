@@ -265,7 +265,7 @@ func TestAlertManagerMaxResolved(t *testing.T) {
 	am.maxResolved = 3
 
 	// Fire and resolve 5 ECC alerts on different GPUs
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		state := &AlertState{
 			GPUs: []*GPUInfo{
 				{Hostname: "node1", Index: i, ECCErrors: 1},

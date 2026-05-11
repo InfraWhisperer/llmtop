@@ -59,7 +59,7 @@ func TestWelfordState_StddevZeroWhenCountLT2(t *testing.T) {
 
 func TestWelfordState_ConstantInput_StddevIsZero(t *testing.T) {
 	var w metrics.WelfordState
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		w.Update(100.0)
 	}
 	if s := w.Stddev(); s != 0 {
@@ -69,7 +69,7 @@ func TestWelfordState_ConstantInput_StddevIsZero(t *testing.T) {
 
 func TestWelfordState_ConstantInput_SigmaIsZero(t *testing.T) {
 	var w metrics.WelfordState
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		w.Update(100.0)
 	}
 	if s := w.Sigma(100.0); s != 0 {
@@ -84,7 +84,7 @@ func TestWelfordState_ConstantInput_SigmaIsZero(t *testing.T) {
 func TestWelfordState_NormalDist_MeanCloseToTrue(t *testing.T) {
 	var w metrics.WelfordState
 	rng := rand.New(rand.NewSource(42))
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		v := rng.NormFloat64()*10.0 + 100.0
 		w.Update(v)
 	}
@@ -96,7 +96,7 @@ func TestWelfordState_NormalDist_MeanCloseToTrue(t *testing.T) {
 func TestWelfordState_NormalDist_StddevCloseToTrue(t *testing.T) {
 	var w metrics.WelfordState
 	rng := rand.New(rand.NewSource(42))
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		v := rng.NormFloat64()*10.0 + 100.0
 		w.Update(v)
 	}
@@ -109,7 +109,7 @@ func TestWelfordState_NormalDist_StddevCloseToTrue(t *testing.T) {
 func TestWelfordState_Sigma_PositiveAboveMean(t *testing.T) {
 	var w metrics.WelfordState
 	rng := rand.New(rand.NewSource(42))
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		v := rng.NormFloat64()*10.0 + 100.0
 		w.Update(v)
 	}
@@ -122,7 +122,7 @@ func TestWelfordState_Sigma_PositiveAboveMean(t *testing.T) {
 func TestWelfordState_Sigma_NegativeBelowMean(t *testing.T) {
 	var w metrics.WelfordState
 	rng := rand.New(rand.NewSource(42))
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		v := rng.NormFloat64()*10.0 + 100.0
 		w.Update(v)
 	}
@@ -133,7 +133,7 @@ func TestWelfordState_Sigma_NegativeBelowMean(t *testing.T) {
 
 func TestWelfordState_Sigma_NotNaNOrInfOnConstant(t *testing.T) {
 	var w metrics.WelfordState
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		w.Update(50.0)
 	}
 	s := w.Sigma(75.0)
@@ -148,7 +148,7 @@ func TestWelfordBank_MaxSigma_BelowWarmup_ReturnsZero(t *testing.T) {
 	var b metrics.WelfordBank
 	w := &metrics.WorkerMetrics{Endpoint: "ep"}
 	w.TTFT.P99 = 200.0
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		b.Update(w)
 	}
 	sigma, name := b.MaxSigma(w)
@@ -161,7 +161,7 @@ func TestWelfordBank_Anomalies_BelowWarmup_ReturnsEmpty(t *testing.T) {
 	var b metrics.WelfordBank
 	w := &metrics.WorkerMetrics{Endpoint: "ep"}
 	w.TTFT.P99 = 200.0
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		b.Update(w)
 	}
 	got := b.Anomalies(w, 2.0)
@@ -174,7 +174,7 @@ func TestWelfordBank_Anomalies_AtMost3(t *testing.T) {
 	var b metrics.WelfordBank
 	rng := rand.New(rand.NewSource(7))
 	// Build baselines for all 6 metrics with low noise.
-	for i := 0; i < 60; i++ {
+	for range 60 {
 		w := &metrics.WorkerMetrics{Endpoint: "ep"}
 		w.KVCacheUsagePct = 50.0 + rng.NormFloat64()*0.5
 		w.TTFT.P99 = 100.0 + rng.NormFloat64()*1.0
@@ -231,7 +231,7 @@ func TestAnomalyStore_BelowWarmup_MaxSigmaIsZero(t *testing.T) {
 	w := &metrics.WorkerMetrics{Endpoint: "ep"}
 	w.TTFT.P99 = 100.0
 	// Feed only 10 ticks — below 30-sample warm-up.
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		s.Update([]*metrics.WorkerMetrics{w})
 	}
 	sigma, name := s.MaxSigma("ep", w)
@@ -244,7 +244,7 @@ func TestAnomalyStore_Anomalies_BelowWarmup_Empty(t *testing.T) {
 	s := metrics.NewAnomalyStore(150)
 	w := &metrics.WorkerMetrics{Endpoint: "ep"}
 	w.TTFT.P99 = 100.0
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		s.Update([]*metrics.WorkerMetrics{w})
 	}
 	got := s.Anomalies("ep", w)

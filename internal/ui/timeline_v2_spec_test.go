@@ -47,7 +47,34 @@ func TestRenderEvictionTimeline_NonEmptyFrames_NonEmptyOutput(t *testing.T) {
 	alert := &metrics.Alert{Title: "kv_critical"}
 	out := ui.RenderEvictionTimeline(frames, alert, "ep", 60, 120, 30)
 	if out == "" {
-		t.Errorf("RenderEvictionTimeline with 121 frames should not be empty")
+		t.Fatalf("RenderEvictionTimeline with 121 frames should not be empty")
+	}
+	// Pin the spec layout: title with alert rule name, frame count, T=0 idx,
+	// and per-track labels.
+	for _, needle := range []string{
+		"KV Eviction Timeline",
+		"kv_critical",
+		"121 ticks",
+		"T=0 at idx 60",
+		"KV%",
+		"Queue",
+		"Evict/s",
+		"Hit %",
+		"-1m",
+		"T=0",
+		"+1m",
+	} {
+		if !strings.Contains(out, needle) {
+			t.Errorf("RenderEvictionTimeline output missing %q\n--- output ---\n%s", needle, out)
+		}
+	}
+	// T=0 cursor glyph is the vertical box-drawing character (┊).
+	if !strings.Contains(out, "┊") {
+		t.Errorf("RenderEvictionTimeline should mark T=0 with ┊ cursor; not found in output")
+	}
+	// At least one of the sparkline block glyphs must appear (KV series varies).
+	if !strings.ContainsAny(out, "▁▂▃▄▅▆▇█") {
+		t.Errorf("RenderEvictionTimeline should render sparkline blocks for KV series")
 	}
 }
 

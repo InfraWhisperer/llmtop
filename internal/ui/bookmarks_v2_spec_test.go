@@ -73,7 +73,7 @@ func TestBookmarkStore_Toggle_RemovesWhenPresent(t *testing.T) {
 func TestBookmarkStore_Toggle_CapAt4_Returns_Error(t *testing.T) {
 	dir := t.TempDir()
 	store := ui.NewBookmarkStore(filepath.Join(dir, "bookmarks.json"))
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		ep := "http://w" + string(rune('0'+i)) + ":8000"
 		lbl := "worker-" + string(rune('0'+i))
 		if _, err := store.Toggle("ctx-1", ep, lbl); err != nil {
@@ -87,6 +87,82 @@ func TestBookmarkStore_Toggle_CapAt4_Returns_Error(t *testing.T) {
 	}
 	if added {
 		t.Errorf("5th Toggle should return added=false")
+	}
+}
+
+// At the cap of 4, toggling off an existing entry must always succeed (no
+// error) even though the count is at the cap. Round-1 flagged this as
+// untested; the impl handles it because the remove branch runs before the
+// cap check, but a regression that reorders those branches would silently
+// break the V8 contract.
+func TestBookmarkStore_Toggle_RemoveAtCap_AlwaysSucceeds(t *testing.T) {
+	dir := t.TempDir()
+	store := ui.NewBookmarkStore(filepath.Join(dir, "bookmarks.json"))
+	endpoints := []string{
+		"http://w0:8000",
+		"http://w1:8000",
+		"http://w2:8000",
+		"http://w3:8000",
+	}
+	for i, ep := range endpoints {
+		if _, err := store.Toggle("ctx-1", ep, "worker-"+string(rune('0'+i))); err != nil {
+			t.Fatalf("Toggle %d: unexpected err %v", i, err)
+		}
+	}
+	if got := len(store.List("ctx-1")); got != 4 {
+		t.Fatalf("setup: expected 4 bookmarks at cap, got %d", got)
+	}
+
+	// Remove the 2nd one (not the last) — exercises the loop's interior
+	// path, not just the tail.
+	added, err := store.Toggle("ctx-1", endpoints[1], "worker-1")
+	if err != nil {
+		t.Fatalf("Toggle-remove at cap returned err=%v, must always succeed", err)
+	}
+	if added {
+		t.Errorf("Toggle-remove should return added=false, got true")
+	}
+	if got := len(store.List("ctx-1")); got != 3 {
+		t.Errorf("after Toggle-remove at cap, expected 3 bookmarks, got %d", got)
+	}
+
+	// And a follow-up add must now succeed because we're back under cap.
+	added, err = store.Toggle("ctx-1", "http://w-new:8000", "worker-new")
+	if err != nil {
+		t.Errorf("post-remove add should succeed (count=3 < cap=4), got err=%v", err)
+	}
+	if !added {
+		t.Errorf("post-remove add should return added=true")
+	}
+}
+
+// Removing every entry one-by-one from a full store must drain to empty
+// without error.
+func TestBookmarkStore_Toggle_DrainFromCap_ToEmpty(t *testing.T) {
+	dir := t.TempDir()
+	store := ui.NewBookmarkStore(filepath.Join(dir, "bookmarks.json"))
+	endpoints := []string{
+		"http://w0:8000",
+		"http://w1:8000",
+		"http://w2:8000",
+		"http://w3:8000",
+	}
+	for i, ep := range endpoints {
+		if _, err := store.Toggle("ctx-1", ep, "worker-"+string(rune('0'+i))); err != nil {
+			t.Fatalf("Toggle %d: unexpected err %v", i, err)
+		}
+	}
+	for _, ep := range endpoints {
+		added, err := store.Toggle("ctx-1", ep, "ignored")
+		if err != nil {
+			t.Fatalf("drain Toggle(%q) returned err=%v", ep, err)
+		}
+		if added {
+			t.Errorf("drain Toggle(%q) should return added=false", ep)
+		}
+	}
+	if got := len(store.List("ctx-1")); got != 0 {
+		t.Errorf("after draining all bookmarks, List should be empty, got %d", got)
 	}
 }
 

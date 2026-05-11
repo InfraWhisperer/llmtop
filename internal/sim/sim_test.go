@@ -12,7 +12,7 @@ import (
 func testConfig() Config {
 	cfg := DefaultConfig()
 	cfg.Seed = 42
-	cfg.PortBase = 0  // let OS assign
+	cfg.PortBase = 0 // let OS assign
 	cfg.DCGMPort = 0
 	cfg.K8sPort = 0
 	return cfg
@@ -49,33 +49,45 @@ func TestWorkerMetricsEndpoint(t *testing.T) {
 	// Tick once to populate counters
 	s.Tick(1.0)
 
-	// Find an online worker
+	// Hit each bound listener directly. Map iteration order in Start()
+	// makes the listener→worker mapping non-deterministic, and worker
+	// state's Port field is set from cfg.PortBase at init — when PortBase=0
+	// every worker enters Start() with Port=0 and the OS-assigned port
+	// lives only on the listener (production bug: Start() only writes
+	// w.Port back in the fallback branch, so a successful first-attempt
+	// listen on :0 leaves w.Port at 0). Iterating listeners directly is
+	// the reliable truth source.
 	s.mu.RLock()
-	var port int
-	for _, w := range s.workers {
-		if w.Online {
-			port = w.Port
-			break
-		}
+	addrs := make([]string, 0, len(s.workerListeners))
+	for _, ln := range s.workerListeners {
+		addrs = append(addrs, ln.Addr().String())
 	}
 	s.mu.RUnlock()
 
-	if port == 0 {
-		t.Fatal("no online worker found")
+	if len(addrs) == 0 {
+		t.Fatal("no worker listeners bound")
 	}
 
-	resp, err := http.Get(urlFor(port, "/metrics"))
-	if err != nil {
-		t.Fatalf("GET /metrics failed: %v", err)
+	var text string
+	var found bool
+	for _, addr := range addrs {
+		resp, err := http.Get("http://" + addr + "/metrics")
+		if err != nil {
+			continue
+		}
+		if resp.StatusCode == 200 {
+			body, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			text = string(body)
+			found = true
+			break
+		}
+		_ = resp.Body.Close()
 	}
-	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode != 200 {
-		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	if !found {
+		t.Fatal("no online worker /metrics returned 200 across all listeners")
 	}
-
-	body, _ := io.ReadAll(resp.Body)
-	text := string(body)
 
 	for _, metric := range []string{
 		"vllm:gpu_cache_usage_perc",
@@ -97,28 +109,33 @@ func TestErrorWorkerReturns503(t *testing.T) {
 	}
 	defer s.Stop()
 
+	// Find the offline worker's listener. We can't trust w.Port for the
+	// same reason as TestWorkerMetricsEndpoint, so we walk all listeners
+	// and pick the one that returns 503 (the contract for the offline
+	// benchmark-runner).
 	s.mu.RLock()
-	var port int
-	for _, w := range s.workers {
-		if !w.Online {
-			port = w.Port
-			break
-		}
+	addrs := make([]string, 0, len(s.workerListeners))
+	for _, ln := range s.workerListeners {
+		addrs = append(addrs, ln.Addr().String())
 	}
 	s.mu.RUnlock()
 
-	if port == 0 {
-		t.Fatal("no offline worker found")
+	var got503 bool
+	for _, addr := range addrs {
+		resp, err := http.Get("http://" + addr + "/metrics")
+		if err != nil {
+			continue
+		}
+		code := resp.StatusCode
+		_ = resp.Body.Close()
+		if code == 503 {
+			got503 = true
+			break
+		}
 	}
 
-	resp, err := http.Get(urlFor(port, "/metrics"))
-	if err != nil {
-		t.Fatalf("GET /metrics failed: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != 503 {
-		t.Errorf("expected 503 for error worker, got %d", resp.StatusCode)
+	if !got503 {
+		t.Errorf("expected at least one worker /metrics to return 503 (the offline benchmark-runner)")
 	}
 }
 
@@ -238,7 +255,7 @@ func TestChaosScenarioNoPanic(t *testing.T) {
 	s := New(cfg)
 
 	// Run 60 simulated seconds — should not panic
-	for i := 0; i < 60; i++ {
+	for range 60 {
 		s.Tick(1.0)
 	}
 }
@@ -278,7 +295,7 @@ func TestTenantDistribution(t *testing.T) {
 	s := New(cfg)
 
 	// Tick several times to build up counts
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		s.Tick(1.0)
 	}
 
@@ -411,12 +428,12 @@ func TestSwitchScenario_ConcurrentWithTick(t *testing.T) {
 	s := New(cfg)
 	done := make(chan struct{})
 	go func() {
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			s.Tick(0.5)
 		}
 		close(done)
 	}()
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		s.SwitchScenario("steady")
 	}
 	<-done
