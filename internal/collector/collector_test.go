@@ -27,34 +27,28 @@ func TestCollectorConcurrentAddRemove(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Goroutine 1: poll repeatedly
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 10; i++ {
+	wg.Go(func() {
+		for range 10 {
 			c.PollNow(ctx)
 		}
-	}()
+	})
 
 	// Goroutine 2: add/remove workers
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 10; i++ {
+	wg.Go(func() {
+		for i := range 10 {
 			ep := fmt.Sprintf("http://localhost:%d", 9000+i)
 			c.AddWorker(WorkerConfig{Endpoint: ep, Backend: metrics.BackendVLLM})
 			c.RemoveWorker(ep)
 		}
-	}()
+	})
 
 	// Goroutine 3: read all
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 10; i++ {
+	wg.Go(func() {
+		for range 10 {
 			_ = c.GetAll()
 			_ = c.Endpoints()
 		}
-	}()
+	})
 
 	wg.Wait()
 }

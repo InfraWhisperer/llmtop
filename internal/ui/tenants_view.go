@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/InfraWhisperer/llmtop/internal/metrics"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // tenantCardColors maps a first-letter hash to a color for tenant card titles.
@@ -61,10 +61,7 @@ func renderTenantPlaceholder(width int) string {
 
 // renderTenantCards renders a 3-column grid of tenant cards, one per model group.
 func renderTenantCards(groups []metrics.ModelGroup, width int) string {
-	cardWidth := (width - 8) / 3
-	if cardWidth < 20 {
-		cardWidth = 20
-	}
+	cardWidth := max((width-8)/3, 20)
 
 	var cards []string
 	for _, g := range groups {
@@ -74,10 +71,7 @@ func renderTenantCards(groups []metrics.ModelGroup, width int) string {
 	// Arrange cards 3 per row
 	var rows []string
 	for i := 0; i < len(cards); i += 3 {
-		end := i + 3
-		if end > len(cards) {
-			end = len(cards)
-		}
+		end := min(i+3, len(cards))
 		row := lipgloss.JoinHorizontal(lipgloss.Top, cards[i:end]...)
 		rows = append(rows, row)
 	}
@@ -162,10 +156,7 @@ func renderTenantCard(g metrics.ModelGroup, cardWidth int) string {
 		lines = append(lines, "")
 		lines = append(lines, labelStyle.Render("Top tenants"))
 		// Inner width inside the card border (Padding(1,2) eats 4 cols).
-		inner := cardWidth - 4
-		if inner < 20 {
-			inner = 20
-		}
+		inner := max(cardWidth-4, 20)
 		for _, t := range tenantRowsForCard(g.TopTenants) {
 			lines = append(lines, renderTenantRow(t, inner))
 		}
@@ -203,10 +194,7 @@ func renderTenantRow(t metrics.TenantMetrics, innerWidth int) string {
 	tok := formatTenantTokPerSec(t.TokPerSec) + " tok/s"
 	// 4-char share column + spacer + tok column = right-side reserved width.
 	rhs := share + "  " + tok
-	tagW := innerWidth - len(rhs) - 2
-	if tagW < 6 {
-		tagW = 6
-	}
+	tagW := max(innerWidth-len(rhs)-2, 6)
 	tag := truncate(t.Tag, tagW)
 	tagPad := padRight(tag, tagW)
 	tagStyle := lipgloss.NewStyle().Foreground(colorWhite)

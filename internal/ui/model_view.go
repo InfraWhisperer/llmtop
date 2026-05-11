@@ -69,11 +69,7 @@ func ModelSortColumnName(s ModelSortColumn) string {
 
 // mgModelWidth computes the flex MODEL column width given terminal width.
 func mgModelWidth(termWidth int) int {
-	w := termWidth - mgFixedWidth
-	if w < 12 {
-		w = 12
-	}
-	return w
+	return max(termWidth-mgFixedWidth, 12)
 }
 
 // RenderModelHeader renders the fleet header for the model-grouped view.

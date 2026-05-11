@@ -9,7 +9,7 @@ import (
 
 func TestWelfordState_ConstantInputZeroSigma(t *testing.T) {
 	var w WelfordState
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		w.Update(100.0)
 	}
 	if w.Sigma(100.0) != 0 {
@@ -26,7 +26,7 @@ func TestWelfordState_ConstantInputZeroSigma(t *testing.T) {
 func TestWelfordState_NormalDistributionFixedSeed(t *testing.T) {
 	var w WelfordState
 	rng := rand.New(rand.NewSource(42))
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		v := 100.0 + rng.NormFloat64()*10.0
 		w.Update(v)
 	}
@@ -59,7 +59,7 @@ func TestWelfordBank_MaxSigmaWarmup(t *testing.T) {
 		RequestsWaiting: 1,
 		GenTokPerSec:    100,
 	}
-	for i := 0; i < 29; i++ {
+	for range 29 {
 		b.Update(w)
 	}
 	if sig, name := b.MaxSigma(w); sig != 0 || name != "" {
@@ -77,7 +77,7 @@ func TestWelfordBank_MaxSigmaSpike(t *testing.T) {
 	b := newWelfordBank(60)
 	rng := rand.New(rand.NewSource(7))
 	baseline := &WorkerMetrics{}
-	for i := 0; i < 60; i++ {
+	for range 60 {
 		baseline.KVCacheUsagePct = 50 + rng.NormFloat64()*2
 		baseline.TTFT = LatencySnapshot{P99: 200 + rng.NormFloat64()*10}
 		baseline.ITL = LatencySnapshot{P99: 50 + rng.NormFloat64()*2}
@@ -107,7 +107,7 @@ func TestWelfordBank_MaxSigmaSpike(t *testing.T) {
 func TestWelfordBank_AnomaliesSorted(t *testing.T) {
 	b := newWelfordBank(60)
 	rng := rand.New(rand.NewSource(99))
-	for i := 0; i < 60; i++ {
+	for range 60 {
 		w := &WorkerMetrics{
 			KVCacheUsagePct: 50 + rng.NormFloat64(),
 			TTFT:            LatencySnapshot{P99: 200 + rng.NormFloat64()*5},
@@ -140,14 +140,14 @@ func TestWelfordBank_AnomaliesWindowEviction(t *testing.T) {
 	b := newWelfordBank(10)
 	// Fill window with v=100.
 	w := &WorkerMetrics{TTFT: LatencySnapshot{P99: 100}}
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		b.Update(w)
 	}
 	if b.TTFTP99.Count != 10 {
 		t.Errorf("Count after fill = %d, want 10", b.TTFTP99.Count)
 	}
 	// Push 5 more — buffer is full, oldest should evict.
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		b.Update(w)
 	}
 	if b.TTFTP99.Count != 10 {
@@ -162,11 +162,11 @@ func TestWelfordBank_AnomaliesWindowEviction(t *testing.T) {
 func TestAnomalyStore_EvictsAbsentEndpoint(t *testing.T) {
 	s := NewAnomalyStore(5)
 	w := &WorkerMetrics{Endpoint: "http://w1", Online: true}
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		s.Update([]*WorkerMetrics{w})
 	}
 	// Now w disappears.
-	for i := 0; i < 11; i++ { // 11 > 2 * window
+	for range 11 { // 11 > 2 * window
 		s.Update(nil)
 	}
 	if sig, name := s.MaxSigma("http://w1", w); sig != 0 || name != "" {
@@ -186,13 +186,13 @@ func TestAnomalyStore_OfflineDoesNotPolluteBaseline(t *testing.T) {
 		RequestsWaiting: 1,
 		GenTokPerSec:    100,
 	}
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		s.Update([]*WorkerMetrics{w})
 	}
 	wOff := *w
 	wOff.Online = false
 	wOff.TTFT = LatencySnapshot{P99: 99999}
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		s.Update([]*WorkerMetrics{&wOff})
 	}
 	// Baseline should not have absorbed the offline garbage.
@@ -217,23 +217,19 @@ func TestAnomalyStore_ConcurrentUpdate(t *testing.T) {
 	s := NewAnomalyStore(50)
 	w := &WorkerMetrics{Endpoint: "http://w1", Online: true}
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 100; j++ {
+	for range 8 {
+		wg.Go(func() {
+			for range 100 {
 				s.Update([]*WorkerMetrics{w})
 			}
-		}()
+		})
 	}
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 100; j++ {
+	for range 8 {
+		wg.Go(func() {
+			for range 100 {
 				_, _ = s.MaxSigma("http://w1", w)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }

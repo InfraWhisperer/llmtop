@@ -10,17 +10,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/InfraWhisperer/llmtop/internal/collector"
 	"github.com/InfraWhisperer/llmtop/internal/metrics"
+	"github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // View represents the current UI view mode.
 type View int
 
 const (
-	ViewMain       View = iota
+	ViewMain View = iota
 	ViewDetail
 	ViewHelp
 	ViewGPU
@@ -89,7 +89,7 @@ type dataMsg struct {
 type GPUSortColumn int
 
 const (
-	GPUSortNone  GPUSortColumn = iota
+	GPUSortNone GPUSortColumn = iota
 	GPUSortUtil
 	GPUSortVRAM
 	GPUSortTemp
@@ -378,10 +378,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if interval < 1 {
 				interval = 2
 			}
-			capTicks := 1800 / interval
-			if capTicks < 900 {
-				capTicks = 900
-			}
+			capTicks := max(1800/interval, 900)
 			m.ring = metrics.NewRingBuffer(capTicks)
 		}
 		// Push the snapshot AFTER alert evaluation so resolved alerts are
@@ -453,7 +450,7 @@ func exportJSONCmd(workers []*metrics.WorkerMetrics, summary metrics.FleetSummar
 	return func() tea.Msg {
 		filename := fmt.Sprintf("llmtop-export-%s.json", time.Now().Format("20060102-150405"))
 		envelope := struct {
-			Summary     metrics.FleetSummary    `json:"summary"`
+			Summary     metrics.FleetSummary     `json:"summary"`
 			Workers     []*metrics.WorkerMetrics `json:"workers"`
 			ModelGroups []metrics.ModelGroup     `json:"model_groups,omitempty"`
 			GPUSummary  *metrics.GPUSummary      `json:"gpu_summary,omitempty"`
@@ -472,7 +469,7 @@ func exportJSONCmd(workers []*metrics.WorkerMetrics, summary metrics.FleetSummar
 		if err != nil {
 			return exportDoneMsg{err: err}
 		}
-		err = os.WriteFile(filename, data, 0o644)
+		err = os.WriteFile(filename, data, 0o600)
 		return exportDoneMsg{filename: filename, err: err}
 	}
 }
@@ -759,7 +756,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.selectedIdx = last
 		}
 		visible := m.workersVisibleRows()
-		_, _ = ClampViewport(len(rows), visible, len(rows)-visible)
 		if visible > 0 && len(rows) > visible {
 			m.viewportOffset = len(rows) - visible
 		} else {
@@ -1296,11 +1292,7 @@ func (m Model) workersVisibleRows() int {
 	if m.anomalyFilterOn {
 		chrome++
 	}
-	v := m.height - chrome
-	if v < 1 {
-		v = 1
-	}
-	return v
+	return max(m.height-chrome, 1)
 }
 
 // scrollViewportToSelection nudges the viewport so the selected data row
@@ -1675,7 +1667,7 @@ func (m Model) renderModelMain() string {
 	// Fill remaining space
 	lines := strings.Count(sb.String(), "\n")
 	remaining := m.height - lines - 3
-	for i := 0; i < remaining; i++ {
+	for range remaining {
 		sb.WriteString("\n")
 	}
 
@@ -1704,7 +1696,7 @@ func (m Model) renderKVCacheMain() string {
 
 	lines := strings.Count(sb.String(), "\n")
 	remaining := m.height - lines - 3
-	for i := 0; i < remaining; i++ {
+	for range remaining {
 		sb.WriteString("\n")
 	}
 
@@ -1731,7 +1723,7 @@ func (m Model) renderPDPoolsMain() string {
 
 	lines := strings.Count(sb.String(), "\n")
 	remaining := m.height - lines - 3
-	for i := 0; i < remaining; i++ {
+	for range remaining {
 		sb.WriteString("\n")
 	}
 
@@ -1787,7 +1779,7 @@ func (m Model) renderAlertsMain() string {
 
 	lines := strings.Count(sb.String(), "\n")
 	remaining := m.height - lines - 3
-	for i := 0; i < remaining; i++ {
+	for range remaining {
 		sb.WriteString("\n")
 	}
 

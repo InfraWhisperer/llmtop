@@ -31,29 +31,20 @@ func RenderBookmarkCompare(workers []*metrics.WorkerMetrics, ring *metrics.RingB
 		return sb.String()
 	}
 
-	n := len(bookmarks)
-	if n > MaxBookmarks {
-		n = MaxBookmarks
-	}
-	colWidth := (width - 4) / n
-	if colWidth < 18 {
-		colWidth = 18
-	}
-	sparkWidth := colWidth - 4
-	if sparkWidth < 8 {
-		sparkWidth = 8
-	}
+	n := min(len(bookmarks), MaxBookmarks)
+	colWidth := max((width-4)/n, 18)
+	sparkWidth := max(colWidth-4, 8)
 
 	// Walk bookmarks to build per-column data and the shared Y max.
 	type colData struct {
-		bm       WorkerBookmark
-		w        *metrics.WorkerMetrics
-		spark    []float64
-		offline  bool
+		bm      WorkerBookmark
+		w       *metrics.WorkerMetrics
+		spark   []float64
+		offline bool
 	}
 	cols := make([]colData, 0, n)
 	var sharedMax float64
-	for i := 0; i < n; i++ {
+	for i := range n {
 		bm := bookmarks[i]
 		var w *metrics.WorkerMetrics
 		for _, candidate := range workers {

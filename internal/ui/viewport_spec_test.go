@@ -24,7 +24,7 @@ import (
 // reason about for viewport tests.
 func makeWorkers(n int) []*metrics.WorkerMetrics {
 	out := make([]*metrics.WorkerMetrics, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		out[i] = &metrics.WorkerMetrics{
 			Endpoint:  "http://w" + itoa(i),
 			Label:     "w" + itoa(i),
@@ -265,7 +265,7 @@ func TestRenderTable_LimitsRowsToVisibleWindow(t *testing.T) {
 	bigOut := ui.RenderTable(workers, 0, ui.SortNone, metrics.BackendUnknown, 200, 100, 0, nil, nil, "")
 	count := func(s string) int {
 		n := 0
-		for i := 0; i < 32; i++ {
+		for i := range 32 {
 			needle := "w" + itoa(i)
 			if strings.Contains(s, needle) {
 				n++

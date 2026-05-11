@@ -3,19 +3,18 @@
 //
 // Pinned contracts:
 //   - sim.Simulator has SwitchScenario(name string) method.
-//   - The method satisfies the ScenarioSwitcher functional shape used by ui.Model
-//     (i.e., a func(string) callback can wrap *sim.Simulator.SwitchScenario without
-//     adapter code).
-//
-// Behavior tests for simTime=0 reset, InitWorker re-run, and -race safety require
-// a constructor and field access the public spec does not document. They are
-// flagged in the test-engineer report rather than written here.
+//   - SwitchScenario("stress") swaps the active scenario without panic and
+//     keeps the worker topology alive (at least one online worker survives
+//     across the switch).
+//   - SwitchScenario("nonexistent") falls back to "steady" (the documented
+//     default) and leaves the simulator usable.
+//   - *sim.Simulator satisfies the ScenarioSwitcher interface used by ui.Model.
 
 package sim_test
 
 import (
-	"reflect"
 	"testing"
+	"time"
 
 	"github.com/InfraWhisperer/llmtop/internal/sim"
 )
@@ -26,31 +25,66 @@ type scenarioSwitcher interface {
 	SwitchScenario(name string)
 }
 
-// TestSimulator_HasSwitchScenarioMethod_TypeAssertion proves *sim.Simulator
-// satisfies the documented method-set without depending on internal field layout.
-// We use reflect to introspect the declared method: a *sim.Simulator value
-// must have a method named "SwitchScenario" whose first non-receiver argument
-// is a string.
-func TestSimulator_HasSwitchScenarioMethod(t *testing.T) {
-	ptrType := reflect.TypeOf((*sim.Simulator)(nil))
-	m, ok := ptrType.MethodByName("SwitchScenario")
-	if !ok {
-		t.Fatalf("*sim.Simulator does not have method SwitchScenario")
+// TestSimulator_SwitchScenario_StressKeepsTopology exercises SwitchScenario
+// end-to-end. Switching to "stress" and advancing 10 simulated seconds must
+// keep at least one online worker. White-box assertions on KV>0.85 live in
+// sim_test.go (same package); here we pin only the public-visible side
+// effect of the switch.
+func TestSimulator_SwitchScenario_StressKeepsTopology(t *testing.T) {
+	cfg := sim.DefaultConfig()
+	cfg.Seed = 1
+	cfg.PortBase = 0
+	cfg.DCGMPort = 0
+	cfg.K8sPort = 0
+	s := sim.New(cfg)
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("SwitchScenario(\"stress\")+AdvanceTo panicked: %v", r)
+		}
+	}()
+	s.SwitchScenario("stress")
+	s.AdvanceTo(10 * time.Second)
+
+	workers := s.Workers()
+	if len(workers) == 0 {
+		t.Fatalf("SwitchScenario(\"stress\") removed all workers")
 	}
-	// Method type's signature: func(*Simulator, string).
-	if m.Type.NumIn() != 2 {
-		t.Fatalf("SwitchScenario should accept 1 arg (plus receiver), got NumIn=%d", m.Type.NumIn())
+	var anyOnline bool
+	for _, w := range workers {
+		if w.Online {
+			anyOnline = true
+			break
+		}
 	}
-	if m.Type.In(1).Kind() != reflect.String {
-		t.Fatalf("SwitchScenario arg 0 should be string, got %v", m.Type.In(1).Kind())
-	}
-	if m.Type.NumOut() != 0 {
-		t.Errorf("SwitchScenario should return nothing, got %d return values", m.Type.NumOut())
+	if !anyOnline {
+		t.Errorf("after SwitchScenario(\"stress\") no workers are Online")
 	}
 }
 
-// TestSimulator_SatisfiesScenarioSwitcherInterface — *sim.Simulator must satisfy
-// the documented ScenarioSwitcher interface so app/ui layers can wire it up.
+// TestSimulator_SwitchScenario_UnknownFallsBack: switching to a name that is
+// not in GetScenario's table must not panic and must leave the simulator in a
+// usable state (subsequent AdvanceTo must complete).
+func TestSimulator_SwitchScenario_UnknownFallsBack(t *testing.T) {
+	cfg := sim.DefaultConfig()
+	cfg.Seed = 2
+	cfg.PortBase = 0
+	cfg.DCGMPort = 0
+	cfg.K8sPort = 0
+	s := sim.New(cfg)
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("SwitchScenario(\"does-not-exist\") panicked: %v", r)
+		}
+	}()
+	s.SwitchScenario("does-not-exist")
+	s.AdvanceTo(2 * time.Second)
+}
+
+// TestSimulator_SatisfiesScenarioSwitcherInterface pins that ui.Model and
+// app.Options can wire a *sim.Simulator into a ScenarioSwitcher field
+// without an adapter.
 func TestSimulator_SatisfiesScenarioSwitcherInterface(t *testing.T) {
 	var _ scenarioSwitcher = (*sim.Simulator)(nil)
 }

@@ -27,10 +27,7 @@ func RenderPDPoolsView(workers []*metrics.WorkerMetrics, width int) string {
 
 	if len(prefill) == 0 && len(decode) == 0 {
 		msg := "No P/D disaggregation detected"
-		pad := (width - len(msg)) / 2
-		if pad < 0 {
-			pad = 0
-		}
+		pad := max((width-len(msg))/2, 0)
 		return "\n" + strings.Repeat(" ", pad) + StyleMetricNA.Render(msg) + "\n"
 	}
 
@@ -46,10 +43,7 @@ func RenderPDPoolsView(workers []*metrics.WorkerMetrics, width int) string {
 func renderPoolRatioBar(nPrefill, nDecode, width int) string {
 	header := StyleDetailSection.Render("POOL RATIO")
 
-	barWidth := width - 4
-	if barWidth < 10 {
-		barWidth = 10
-	}
+	barWidth := max(width-4, 10)
 
 	total := nPrefill + nDecode
 	prefillPct := 0
@@ -86,17 +80,11 @@ func renderPrefillPool(prefill []*metrics.WorkerMetrics, width int) string {
 		return "  " + header + "\n  " + StyleMetricNA.Render("no prefill workers")
 	}
 
-	cardWidth := (width - 8) / 3
-	if cardWidth < 20 {
-		cardWidth = 20
-	}
+	cardWidth := max((width-8)/3, 20)
 
 	var rows []string
 	for i := 0; i < len(prefill); i += 3 {
-		end := i + 3
-		if end > len(prefill) {
-			end = len(prefill)
-		}
+		end := min(i+3, len(prefill))
 		var cards []string
 		for _, w := range prefill[i:end] {
 			cards = append(cards, renderPrefillCard(w, cardWidth))
@@ -116,10 +104,7 @@ func renderPrefillCard(w *metrics.WorkerMetrics, cardWidth int) string {
 		borderColor = lipgloss.Color("#FFD700")
 	}
 
-	innerWidth := cardWidth - 4
-	if innerWidth < 10 {
-		innerWidth = 10
-	}
+	innerWidth := max(cardWidth-4, 10)
 
 	// Title
 	name := workerShortName(w)
@@ -159,7 +144,7 @@ func renderPrefillCard(w *metrics.WorkerMetrics, cardWidth int) string {
 	cardStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
-		Width(cardWidth - 2).
+		Width(cardWidth-2).
 		Padding(0, 1)
 
 	return cardStyle.Render(content)
@@ -178,10 +163,7 @@ func renderDecodeAndHealth(prefill, decode []*metrics.WorkerMetrics, width int) 
 
 // renderDecodeAggregate renders the DECODE POOL AGGREGATE card.
 func renderDecodeAggregate(decode []*metrics.WorkerMetrics, cardWidth int) string {
-	innerWidth := cardWidth - 4
-	if innerWidth < 10 {
-		innerWidth = 10
-	}
+	innerWidth := max(cardWidth-4, 10)
 
 	title := StyleDetailSection.Render("DECODE POOL AGGREGATE")
 
@@ -251,7 +233,7 @@ func renderDecodeAggregate(decode []*metrics.WorkerMetrics, cardWidth int) strin
 	cardStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#21262d")).
-		Width(cardWidth - 2).
+		Width(cardWidth-2).
 		Padding(0, 1)
 
 	return cardStyle.Render(content)
@@ -259,10 +241,7 @@ func renderDecodeAggregate(decode []*metrics.WorkerMetrics, cardWidth int) strin
 
 // renderPDHealth renders the P/D health card.
 func renderPDHealth(prefill, decode []*metrics.WorkerMetrics, cardWidth int) string {
-	innerWidth := cardWidth - 4
-	if innerWidth < 10 {
-		innerWidth = 10
-	}
+	innerWidth := max(cardWidth-4, 10)
 
 	title := StyleDetailSection.Render("P/D health")
 
@@ -288,7 +267,7 @@ func renderPDHealth(prefill, decode []*metrics.WorkerMetrics, cardWidth int) str
 	cardStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#21262d")).
-		Width(cardWidth - 2).
+		Width(cardWidth-2).
 		Padding(0, 1)
 
 	return cardStyle.Render(content)
@@ -365,10 +344,7 @@ func cardRow(label, value string, width int) string {
 	labelRendered := lipgloss.NewStyle().Foreground(colorSubtext).Render(label)
 	labelLen := len(label)
 	valueLen := len(value)
-	gap := width - labelLen - valueLen
-	if gap < 1 {
-		gap = 1
-	}
+	gap := max(width-labelLen-valueLen, 1)
 	return labelRendered + strings.Repeat(" ", gap) + value
 }
 
@@ -378,10 +354,7 @@ func cardRowStyled(label, styledValue string, width int) string {
 	// styledValue contains ANSI codes so we can't measure it directly for alignment;
 	// use label length to compute left padding and let lipgloss handle the rest.
 	labelLen := len(label)
-	gap := width - labelLen - estimatePlainLen(styledValue)
-	if gap < 1 {
-		gap = 1
-	}
+	gap := max(width-labelLen-estimatePlainLen(styledValue), 1)
 	return labelRendered + strings.Repeat(" ", gap) + styledValue
 }
 

@@ -119,20 +119,14 @@ func renderGPUGridCard(g *metrics.GPUInfo, selected bool, cardWidth int) string 
 	}
 
 	// Inner width accounts for border padding (1 char each side from lipgloss border)
-	innerWidth := cardWidth - 4
-	if innerWidth < 20 {
-		innerWidth = 20
-	}
+	innerWidth := max(cardWidth-4, 20)
 
 	// Title line: "GPU N" left, util% right
 	gpuLabel := fmt.Sprintf("GPU %d", g.Index)
 	utilPctStr := fmt.Sprintf("%.0f%%", g.UtilPct)
 	utilStyle := lipgloss.NewStyle().Foreground(utilColor(g.UtilPct)).Bold(true)
 
-	titlePadding := innerWidth - len(gpuLabel) - len(utilPctStr)
-	if titlePadding < 1 {
-		titlePadding = 1
-	}
+	titlePadding := max(innerWidth-len(gpuLabel)-len(utilPctStr), 1)
 	titleLine := lipgloss.NewStyle().Bold(true).Foreground(colorWhite).Render(gpuLabel) +
 		strings.Repeat(" ", titlePadding) +
 		utilStyle.Render(utilPctStr)
@@ -200,10 +194,7 @@ func renderGPUGridCard(g *metrics.GPUInfo, selected bool, cardWidth int) string 
 
 // RenderGPUCards renders a 2-column grid of GPU cards.
 func RenderGPUCards(gpus []*metrics.GPUInfo, selectedIdx int, width int) string {
-	cardWidth := (width - 6) / 2
-	if cardWidth < 30 {
-		cardWidth = 30
-	}
+	cardWidth := max((width-6)/2, 30)
 
 	var rows []string
 	for i := 0; i < len(gpus); i += 2 {
@@ -248,7 +239,7 @@ func (m Model) renderGPUMain() string {
 	// Fill remaining space
 	lines := strings.Count(sb.String(), "\n")
 	remaining := m.height - lines - 3
-	for i := 0; i < remaining; i++ {
+	for range remaining {
 		sb.WriteString("\n")
 	}
 

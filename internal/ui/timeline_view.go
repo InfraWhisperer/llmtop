@@ -57,10 +57,7 @@ func RenderEvictionTimeline(frames []metrics.FrameSnapshot, alert *metrics.Alert
 		hitSeries[i] = w.CacheHitRatePct
 	}
 
-	trackWidth := width - 14
-	if trackWidth < 30 {
-		trackWidth = 30
-	}
+	trackWidth := max(width-14, 30)
 
 	sb.WriteString(renderTimelineTrack("KV%      ", kvSeries, alertTickIdx, trackWidth, kvAnnotations()))
 	sb.WriteString(renderTimelineTrack("Queue    ", queueSeries, alertTickIdx, trackWidth, nil))
@@ -186,16 +183,10 @@ func renderTimelineAxis(t0Idx, total, width int) string {
 	pos := t0Idx * width / total
 	var sb strings.Builder
 	sb.WriteString(StyleMetricNA.Render(left))
-	pad := pos - len(left) - len(mid)/2
-	if pad < 1 {
-		pad = 1
-	}
+	pad := max(pos-len(left)-len(mid)/2, 1)
 	sb.WriteString(strings.Repeat(" ", pad))
 	sb.WriteString(StyleHeaderAmber.Render(mid))
-	tail := width - pos - len(mid)/2 - len(right)
-	if tail < 1 {
-		tail = 1
-	}
+	tail := max(width-pos-len(mid)/2-len(right), 1)
 	sb.WriteString(strings.Repeat(" ", tail))
 	sb.WriteString(StyleMetricNA.Render(right))
 	return sb.String()

@@ -27,7 +27,6 @@ func TestFrameSnapshot_FieldsAreExportedAndAddressable(t *testing.T) {
 		At:      now,
 		Workers: []metrics.WorkerMetrics{{Endpoint: "a"}},
 		Summary: metrics.FleetSummary{},
-		Alerts:  []metrics.Alert{},
 	}
 	if !f.At.Equal(now) {
 		t.Fatalf("At round-trip failed: got %v want %v", f.At, now)
@@ -114,7 +113,7 @@ func TestRingBuffer_AtZero_IsMostRecentPush(t *testing.T) {
 
 func TestRingBuffer_AtPosFour_IsOldestOnFiveFrames(t *testing.T) {
 	r := metrics.NewRingBuffer(10)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		r.Push(metrics.FrameSnapshot{At: time.Unix(int64(i+1), 0)})
 	}
 	got, ok := r.At(4)
@@ -128,7 +127,7 @@ func TestRingBuffer_AtPosFour_IsOldestOnFiveFrames(t *testing.T) {
 
 func TestRingBuffer_AtOutOfRange_ReturnsFalse(t *testing.T) {
 	r := metrics.NewRingBuffer(10)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		r.Push(metrics.FrameSnapshot{At: time.Unix(int64(i+1), 0)})
 	}
 	_, ok := r.At(5)
@@ -147,7 +146,7 @@ func TestRingBuffer_AtOnEmpty_ReturnsFalse(t *testing.T) {
 
 func TestRingBuffer_LenIncrementsUntilCap(t *testing.T) {
 	r := metrics.NewRingBuffer(3)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		r.Push(metrics.FrameSnapshot{At: time.Unix(int64(i+1), 0)})
 	}
 	if r.Len() != 3 {
@@ -157,7 +156,7 @@ func TestRingBuffer_LenIncrementsUntilCap(t *testing.T) {
 
 func TestRingBuffer_LenSaturatesAtCap(t *testing.T) {
 	r := metrics.NewRingBuffer(3)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		r.Push(metrics.FrameSnapshot{At: time.Unix(int64(i+1), 0)})
 	}
 	if r.Len() != 3 {
@@ -169,7 +168,7 @@ func TestRingBuffer_LenSaturatesAtCap(t *testing.T) {
 func TestRingBuffer_PushOverflow_OverwritesOldest(t *testing.T) {
 	cap := 5
 	r := metrics.NewRingBuffer(cap)
-	for i := 0; i < cap+1; i++ {
+	for i := range cap+1 {
 		r.Push(metrics.FrameSnapshot{At: time.Unix(int64(i+1), 0)})
 	}
 	// After cap+1 pushes, the oldest retained frame is the 2nd push (t=2).
@@ -186,7 +185,7 @@ func TestRingBuffer_PushOverflow_OverwritesOldest(t *testing.T) {
 func TestRingBuffer_PushCapPlus5_AtZero_IsMostRecent(t *testing.T) {
 	cap := 10
 	r := metrics.NewRingBuffer(cap)
-	for i := 0; i < cap+5; i++ {
+	for i := range cap+5 {
 		r.Push(metrics.FrameSnapshot{At: time.Unix(int64(i+1), 0)})
 	}
 	got, _ := r.At(0)
@@ -199,7 +198,7 @@ func TestRingBuffer_PushCapPlus5_AtZero_IsMostRecent(t *testing.T) {
 func TestRingBuffer_PushCapPlus5_AtCapMinus1_IsSixthPush(t *testing.T) {
 	cap := 10
 	r := metrics.NewRingBuffer(cap)
-	for i := 0; i < cap+5; i++ {
+	for i := range cap+5 {
 		r.Push(metrics.FrameSnapshot{At: time.Unix(int64(i+1), 0)})
 	}
 	got, _ := r.At(cap - 1)
@@ -216,7 +215,7 @@ func TestRingBuffer_ConcurrentPush_NoPanicLenAtMostCap(t *testing.T) {
 	r := metrics.NewRingBuffer(cap)
 	var wg sync.WaitGroup
 	N := 200
-	for i := 0; i < N; i++ {
+	for i := range N {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -237,7 +236,7 @@ func TestRingBuffer_ConcurrentPushAndRead_NoPanic(t *testing.T) {
 	r := metrics.NewRingBuffer(20)
 	done := make(chan struct{})
 	go func() {
-		for i := 0; i < 1000; i++ {
+		for i := range 1000 {
 			r.Push(metrics.FrameSnapshot{At: time.Unix(int64(i+1), 0)})
 		}
 		close(done)
@@ -265,7 +264,7 @@ func TestSparklineFor_EmptyRing_ReturnsNil(t *testing.T) {
 
 func TestSparklineFor_FewerSamplesThanN_ReturnsAvailable(t *testing.T) {
 	r := metrics.NewRingBuffer(900)
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		w := metrics.WorkerMetrics{Endpoint: "ep"}
 		w.TTFT.P99 = float64(i + 1)
 		f := metrics.FrameSnapshot{
@@ -283,7 +282,7 @@ func TestSparklineFor_FewerSamplesThanN_ReturnsAvailable(t *testing.T) {
 func TestSparklineFor_OldestFirstOrdering(t *testing.T) {
 	r := metrics.NewRingBuffer(900)
 	// TTFT.P99 = i+1 for i = 0..99. After 100 pushes, last 50 P99 values (oldest-first) are 51..100.
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		w := metrics.WorkerMetrics{Endpoint: "ep"}
 		w.TTFT.P99 = float64(i + 1)
 		r.Push(metrics.FrameSnapshot{
@@ -305,7 +304,7 @@ func TestSparklineFor_OldestFirstOrdering(t *testing.T) {
 
 func TestSparklineFor_UnknownEndpoint_DoesNotPanic(t *testing.T) {
 	r := metrics.NewRingBuffer(10)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		w := metrics.WorkerMetrics{Endpoint: "ep-real"}
 		w.TTFT.P99 = float64(i)
 		r.Push(metrics.FrameSnapshot{Workers: []metrics.WorkerMetrics{w}})
@@ -368,7 +367,7 @@ func TestExtractTimelineWindow_NilOnEmptyRing(t *testing.T) {
 
 func TestExtractTimelineWindow_TargetMidRing_Returns2HalfPlus1(t *testing.T) {
 	r := metrics.NewRingBuffer(200)
-	for i := 0; i < 121; i++ {
+	for i := range 121 {
 		r.Push(metrics.FrameSnapshot{At: time.Unix(int64(i+1), 0)})
 	}
 	target := time.Unix(61, 0) // middle frame
@@ -380,7 +379,7 @@ func TestExtractTimelineWindow_TargetMidRing_Returns2HalfPlus1(t *testing.T) {
 
 func TestExtractTimelineWindow_OutsideRange_ReturnsNil(t *testing.T) {
 	r := metrics.NewRingBuffer(50)
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		r.Push(metrics.FrameSnapshot{At: time.Unix(int64(1000+i), 0)})
 	}
 	// Target far in the future, outside stored range.
@@ -392,7 +391,7 @@ func TestExtractTimelineWindow_OutsideRange_ReturnsNil(t *testing.T) {
 
 func TestExtractTimelineWindow_OldestFirstOrdering(t *testing.T) {
 	r := metrics.NewRingBuffer(200)
-	for i := 0; i < 121; i++ {
+	for i := range 121 {
 		r.Push(metrics.FrameSnapshot{At: time.Unix(int64(i+1), 0)})
 	}
 	got := r.ExtractTimelineWindow(time.Unix(61, 0), 60)

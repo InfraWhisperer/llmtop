@@ -170,8 +170,8 @@ var (
 				Bold(true)
 
 	StyleBadgeNIM = lipgloss.NewStyle().
-				Foreground(colorGreen).
-				Bold(true)
+			Foreground(colorGreen).
+			Bold(true)
 
 	StyleBadgeTGI = lipgloss.NewStyle().
 			Foreground(colorYellow).
@@ -324,10 +324,7 @@ func RenderKVBar(pct float64, width int) string {
 	if pct <= 0 {
 		return lipgloss.NewStyle().Foreground(colorSubtext).Render(strings.Repeat("─", width))
 	}
-	filled := int(pct / 100 * float64(width))
-	if filled > width {
-		filled = width
-	}
+	filled := min(int(pct/100*float64(width)), width)
 	if filled < 1 && pct > 0 {
 		filled = 1
 	}

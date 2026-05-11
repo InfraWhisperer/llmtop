@@ -141,7 +141,7 @@ func TestHandleScrubKey_RingNilReturnsFalse(t *testing.T) {
 func TestHandleScrubKey_BackForwardLive(t *testing.T) {
 	m := newTestModel()
 	m.ring = metrics.NewRingBuffer(5)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		m.ring.Push(metrics.CaptureFrame(
 			[]*metrics.WorkerMetrics{{Endpoint: "ep"}},
 			metrics.FleetSummary{},
@@ -169,10 +169,10 @@ func TestHandleScrubKey_BackForwardLive(t *testing.T) {
 func TestHandleScrubKey_StopsAtOldest(t *testing.T) {
 	m := newTestModel()
 	m.ring = metrics.NewRingBuffer(5)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		m.ring.Push(metrics.CaptureFrame(nil, metrics.FleetSummary{}, nil))
 	}
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		_, m = m.handleScrubKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
 	}
 	if m.travelOffset != 2 {
@@ -256,7 +256,7 @@ func TestNextScenarioCycle(t *testing.T) {
 
 func TestFleetHistorySlice_OrderingAndCap(t *testing.T) {
 	m := newTestModel()
-	for i := 0; i < 70; i++ {
+	for i := range 70 {
 		m.fleetHistory[m.fleetHistoryHead] = metrics.FleetSummary{TotalTokPerSec: float64(i)}
 		m.fleetHistoryHead = (m.fleetHistoryHead + 1) % len(m.fleetHistory)
 		if m.fleetHistoryLen < len(m.fleetHistory) {

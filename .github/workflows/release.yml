@@ -8,6 +8,9 @@ on:
 permissions:
   contents: write
   packages: write
+  # Required for keyless signing / build provenance attestation via sigstore.
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -15,22 +18,35 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "1.25"
           cache: true
 
+      # Pinned to v2.x minor range — reproducible across runs, but still
+      # picks up patch fixes. Bump deliberately when GoReleaser cuts a new
+      # minor with features we want.
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+        id: goreleaser
+        uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
-          version: latest
+          version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Required by the brews block in .goreleaser.yaml — needs `repo`
+          # scope on the homebrew-tap repo. Document in CONTRIBUTING.md.
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+      # SLSA build provenance for each released artifact. Lets consumers
+      # verify the binary came from this workflow on this commit.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "dist/checksums.txt"

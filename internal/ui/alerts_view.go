@@ -113,10 +113,7 @@ func renderAlertRow(a *metrics.Alert, selected bool, width int) string {
 
 	// Title line
 	titleText := truncate(a.Title, width-35)
-	gap := width - 14 - len(titleText) - len(ageStr)
-	if gap < 2 {
-		gap = 2
-	}
+	gap := max(width-14-len(titleText)-len(ageStr), 2)
 
 	var titleLine string
 	if resolved {

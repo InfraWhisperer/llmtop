@@ -89,6 +89,30 @@ func TestRenderPulseStrip_NarrowTerminal_NoSparklineGlyphs(t *testing.T) {
 	}
 }
 
+// The narrow-width strip is still a 2-line strip (TTFT row + tok/s row).
+// Round-1 punted on this; the spec is unambiguous now that the impl is in
+// place (renderPulseStripCompact writes two "...\n" lines).
+func TestRenderPulseStrip_NarrowTerminal_IsTwoLines(t *testing.T) {
+	hist := []metrics.FleetSummary{{P99TTFT: 250, TotalTokPerSec: 1200}}
+	got := ui.RenderPulseStrip(hist, 50, 24)
+	if got == "" {
+		t.Fatalf("RenderPulseStrip at width=50 should not be empty (height>=12)")
+	}
+	if nl := strings.Count(got, "\n"); nl != 2 {
+		t.Errorf("narrow-width pulse strip should be 2 lines (2 newlines), got %d in %q", nl, got)
+	}
+}
+
+func TestRenderPulseStrip_NarrowTerminal_RendersTTFTAndTokValues(t *testing.T) {
+	hist := []metrics.FleetSummary{{P99TTFT: 250, TotalTokPerSec: 1200}}
+	got := ui.RenderPulseStrip(hist, 50, 24)
+	for _, needle := range []string{"TTFT P99", "tok/s", "250", "1200"} {
+		if !strings.Contains(got, needle) {
+			t.Errorf("narrow-width pulse strip should contain %q, got %q", needle, got)
+		}
+	}
+}
+
 func TestRenderPulseStrip_EmptyHistory_DoesNotPanic(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {

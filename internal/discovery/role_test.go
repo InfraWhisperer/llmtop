@@ -1,3 +1,5 @@
+//go:build !nokubernetes
+
 package discovery
 
 import "testing"

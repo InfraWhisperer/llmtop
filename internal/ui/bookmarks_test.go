@@ -40,7 +40,7 @@ func TestBookmarkStore_ToggleAddRemove(t *testing.T) {
 
 func TestBookmarkStore_MaxEnforced(t *testing.T) {
 	s := NewBookmarkStore(tempBookmarkPath(t))
-	for i := 0; i < MaxBookmarks; i++ {
+	for i := range MaxBookmarks {
 		ep := "http://w" + string(rune('0'+i))
 		if _, err := s.Toggle("ctx", ep, "w"); err != nil {
 			t.Fatalf("toggle %d returned error: %v", i, err)

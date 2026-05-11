@@ -13,10 +13,10 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "1.25"
           cache: true
@@ -27,14 +27,27 @@ jobs:
       - name: Verify module
         run: go mod verify
 
+      # Fail the build if go.mod/go.sum drift from what the tree implies.
+      - name: go mod tidy is clean
+        run: |
+          go mod tidy
+          if ! git diff --quiet go.mod go.sum; then
+            echo "::error::go.mod / go.sum need 'go mod tidy'"
+            git diff go.mod go.sum
+            exit 1
+          fi
+
       - name: Build
         run: go build -v ./cmd/llmtop
 
       - name: Build (nokubernetes)
         run: go build -tags nokubernetes -v ./cmd/llmtop
 
-      - name: Run tests
-        run: go test -race -coverprofile=coverage.out ./...
+      # Plain test + coverage. Race lives in its own job so failures are easier
+      # to attribute and the coverage upload isn't slowed by race-instrumented
+      # binaries.
+      - name: Run tests with coverage
+        run: go test -coverprofile=coverage.out ./...
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4
@@ -42,21 +55,47 @@ jobs:
           file: ./coverage.out
           fail_ci_if_error: false
 
+  race:
+    name: Race detector
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+          cache: true
+      - name: go test -race
+        run: go test -race ./...
+
+  flake-hunt:
+    name: Flake hunt (serial, count=2)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+          cache: true
+      # Serial package execution + double run exposes ordering- and warm-cache-
+      # dependent flakes that the standard parallel run misses.
+      - name: go test -count=2 -p 1
+        run: go test -count=2 -p 1 ./...
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "1.25"
           cache: true
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v8
         with:
           version: v2.11.3
 
@@ -79,10 +118,10 @@ jobs:
             goarch: amd64
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "1.25"
           cache: true

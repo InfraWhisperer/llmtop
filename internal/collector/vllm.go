@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"maps"
 	"time"
 
 	"github.com/InfraWhisperer/llmtop/internal/metrics"
@@ -119,9 +120,7 @@ func parseVLLMMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, pre
 	tagCounters := pm.GetAllGaugesByLabel("vllm:request_success_total", "request_tag")
 	if len(tagCounters) > 0 {
 		m.TenantReqs = make(map[string]float64, len(tagCounters))
-		for tag, v := range tagCounters {
-			m.TenantReqs[tag] = v
-		}
+		maps.Copy(m.TenantReqs, tagCounters)
 	}
 
 	// KV transfer P99 (prefill workers only). vLLM disagg / Dynamo emits

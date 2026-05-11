@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -379,12 +380,7 @@ func orderedCapabilities(detected []metrics.Backend) []BackendCapability {
 }
 
 func isDetected(b metrics.Backend, detected []metrics.Backend) bool {
-	for _, d := range detected {
-		if d == b {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(detected, b)
 }
 
 // columnWidth picks a per-column width that accommodates either the short
