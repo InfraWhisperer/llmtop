@@ -73,7 +73,7 @@ func (d *DCGMCollector) Stop() {
 // PollNow triggers an immediate synchronous poll of all DCGM exporter pods.
 // Each pod is scraped concurrently; results are merged into the shared GPU map.
 // The provided ctx is threaded into each HTTP request so that in-flight
-// fetches are cancelled when the parent context is done.
+// fetches are canceled when the parent context is done.
 func (d *DCGMCollector) PollNow(ctx context.Context) {
 	if !atomic.CompareAndSwapInt32(&d.polling, 0, 1) {
 		return // poll already in progress

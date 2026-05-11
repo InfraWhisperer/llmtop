@@ -31,7 +31,7 @@ func DiscoverLocal(ctx context.Context) []Target {
 
 // DiscoverPorts probes the given host:ports concurrently. It first tries /metrics;
 // if that fails (connection error or non-200), it falls back to /v1/metrics for NIM.
-// Only ports that return a recognised backend are included in the results.
+// Only ports that return a recognized backend are included in the results.
 func DiscoverPorts(ctx context.Context, host string, ports []int) []Target {
 	client := &http.Client{
 		Timeout: 500 * time.Millisecond,

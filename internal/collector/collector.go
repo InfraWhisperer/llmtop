@@ -138,7 +138,7 @@ func (c *Collector) GetHistory(endpoint string) []*metrics.WorkerMetrics {
 
 // PollNow triggers an immediate poll of all workers (non-blocking).
 // The provided ctx is threaded into each HTTP request so that in-flight
-// fetches are cancelled when the parent context is done.
+// fetches are canceled when the parent context is done.
 func (c *Collector) PollNow(ctx context.Context) {
 	if !atomic.CompareAndSwapInt32(&c.polling, 0, 1) {
 		return // poll already in progress

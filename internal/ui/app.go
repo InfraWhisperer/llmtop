@@ -469,7 +469,7 @@ func exportJSONCmd(workers []*metrics.WorkerMetrics, summary metrics.FleetSummar
 		if err != nil {
 			return exportDoneMsg{err: err}
 		}
-		err = os.WriteFile(filename, data, 0o644)
+		err = os.WriteFile(filename, data, 0o600)
 		return exportDoneMsg{filename: filename, err: err}
 	}
 }

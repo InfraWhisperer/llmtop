@@ -27,7 +27,6 @@ func TestFrameSnapshot_FieldsAreExportedAndAddressable(t *testing.T) {
 		At:      now,
 		Workers: []metrics.WorkerMetrics{{Endpoint: "a"}},
 		Summary: metrics.FleetSummary{},
-		Alerts:  []metrics.Alert{},
 	}
 	if !f.At.Equal(now) {
 		t.Fatalf("At round-trip failed: got %v want %v", f.At, now)

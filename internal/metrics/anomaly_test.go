@@ -218,22 +218,18 @@ func TestAnomalyStore_ConcurrentUpdate(t *testing.T) {
 	w := &WorkerMetrics{Endpoint: "http://w1", Online: true}
 	var wg sync.WaitGroup
 	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 100; j++ {
+		wg.Go(func() {
+			for range 100 {
 				s.Update([]*WorkerMetrics{w})
 			}
-		}()
+		})
 	}
 	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 100; j++ {
+		wg.Go(func() {
+			for range 100 {
 				_, _ = s.MaxSigma("http://w1", w)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }

@@ -277,23 +277,19 @@ func TestRingBuffer_ConcurrentPushAt(t *testing.T) {
 	r := NewRingBuffer(100)
 	var wg sync.WaitGroup
 	for i := range 10 {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			for j := 0; j < 100; j++ {
+		wg.Go(func() {
+			for j := range 100 {
 				r.Push(FrameSnapshot{At: time.Unix(int64(i*100+j), 0)})
 			}
-		}(i)
+		})
 	}
 	for range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 100; j++ {
+		wg.Go(func() {
+			for range 100 {
 				_, _ = r.At(0)
 				_ = r.Len()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if r.Len() != 100 {

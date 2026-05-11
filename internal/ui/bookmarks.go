@@ -148,7 +148,7 @@ func (s *BookmarkStore) Save() error {
 	if err != nil {
 		return fmt.Errorf("marshal bookmarks: %w", err)
 	}
-	return os.WriteFile(s.path, data, 0o644)
+	return os.WriteFile(s.path, data, 0o600)
 }
 
 // DefaultBookmarksPath returns the platform-conventional config path:

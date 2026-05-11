@@ -10,6 +10,7 @@ package collector_test
 import (
 	"context"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -25,13 +26,18 @@ func vllmTextWithTags(reqs map[string]float64) string {
 	out += `vllm:num_requests_running{model_name="m"} 1` + "\n"
 	out += "# TYPE vllm:gpu_cache_usage_perc gauge\n"
 	out += `vllm:gpu_cache_usage_perc{model_name="m"} 0.5` + "\n"
-	out += "# TYPE vllm:request_success_total counter\n"
+	var sb strings.Builder
+	sb.WriteString(out)
+	sb.WriteString("# TYPE vllm:request_success_total counter\n")
 	for tag, v := range reqs {
 		// printf with float repr good enough for the Prometheus parser.
-		out += "vllm:request_success_total{model_name=\"m\",request_tag=\"" + tag + "\"} "
-		out += formatFloat(v) + "\n"
+		sb.WriteString("vllm:request_success_total{model_name=\"m\",request_tag=\"")
+		sb.WriteString(tag)
+		sb.WriteString("\"} ")
+		sb.WriteString(formatFloat(v))
+		sb.WriteString("\n")
 	}
-	return out
+	return sb.String()
 }
 
 func formatFloat(v float64) string {
