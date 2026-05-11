@@ -299,10 +299,7 @@ func RenderHitRateBar(pct float64, width int) string {
 	if pct > 100 {
 		pct = 100
 	}
-	filled := int(pct / 100 * float64(width))
-	if filled > width {
-		filled = width
-	}
+	filled := min(int(pct/100*float64(width)), width)
 	if filled < 1 && pct > 0 {
 		filled = 1
 	}

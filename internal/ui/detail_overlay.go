@@ -20,14 +20,8 @@ func RenderDetailOverlay(w *metrics.WorkerMetrics, gpus []*metrics.GPUInfo, widt
 		return ""
 	}
 
-	innerWidth := width - 8
-	if innerWidth < 60 {
-		innerWidth = 60
-	}
-	innerHeight := height - 6
-	if innerHeight < 20 {
-		innerHeight = 20
-	}
+	innerWidth := max(width-8, 60)
+	innerHeight := max(height-6, 20)
 
 	var sb strings.Builder
 
@@ -38,8 +32,7 @@ func RenderDetailOverlay(w *metrics.WorkerMetrics, gpus []*metrics.GPUInfo, widt
 
 	// Identity section
 	sb.WriteString(overlayRow("Pod", w.Label, innerWidth))
-	if strings.HasPrefix(w.Endpoint, "k8s://") {
-		parts := strings.TrimPrefix(w.Endpoint, "k8s://")
+	if parts, ok := strings.CutPrefix(w.Endpoint, "k8s://"); ok {
 		if idx := strings.Index(parts, "/"); idx > 0 {
 			sb.WriteString(overlayRow("Namespace", parts[:idx], innerWidth))
 		}
@@ -161,16 +154,9 @@ var cdfBlocks = []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
 func renderCDFSparkline(cdf [10]float64) string {
 	var sb strings.Builder
 	for _, f := range cdf {
-		if f < 0 {
-			f = 0
-		}
-		if f > 1 {
-			f = 1
-		}
-		idx := int(f * float64(len(cdfBlocks)-1))
-		if idx < 0 {
-			idx = 0
-		}
+		f = max(f, 0)
+		f = min(f, 1)
+		idx := max(int(f*float64(len(cdfBlocks)-1)), 0)
 		if idx >= len(cdfBlocks) {
 			idx = len(cdfBlocks) - 1
 		}

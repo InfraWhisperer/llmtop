@@ -49,11 +49,7 @@ func kcWorkerWidth(termWidth int, showNVMe bool) int {
 	if showNVMe {
 		fixed = kcFixedWidthNVMe
 	}
-	w := termWidth - fixed
-	if w < 16 {
-		w = 16
-	}
-	return w
+	return max(termWidth-fixed, 16)
 }
 
 // renderTierBar renders an inline bar of barWidth chars filled proportionally to pct,
@@ -62,10 +58,7 @@ func renderTierBar(pct float64, barWidth int, color lipgloss.Color) string {
 	if pct <= 0 {
 		return lipgloss.NewStyle().Foreground(colorBarEmpty).Render(strings.Repeat("░", barWidth))
 	}
-	filled := int(pct / 100 * float64(barWidth))
-	if filled > barWidth {
-		filled = barWidth
-	}
+	filled := min(int(pct/100*float64(barWidth)), barWidth)
 	if filled < 1 && pct > 0 {
 		filled = 1
 	}

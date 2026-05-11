@@ -31,18 +31,11 @@ var fixedWidth = colRole + colBackend + colKV + colKVBar + colQueue + colRun + c
 
 // flexWidths computes dynamic ENDPOINT and MODEL column widths from terminal width.
 func flexWidths(termWidth int) (epW, modelW int) {
-	avail := termWidth - fixedWidth
-	if avail < 30 {
-		avail = 30
-	}
+	avail := max(termWidth-fixedWidth, 30)
 	epW = avail * 55 / 100
 	modelW = avail - epW
-	if epW < 15 {
-		epW = 15
-	}
-	if modelW < 10 {
-		modelW = 10
-	}
+	epW = max(epW, 15)
+	modelW = max(modelW, 10)
 	return epW, modelW
 }
 
@@ -50,7 +43,7 @@ func flexWidths(termWidth int) (epW, modelW int) {
 type SortColumn int
 
 const (
-	SortNone    SortColumn = iota
+	SortNone SortColumn = iota
 	SortKVCache
 	SortQueue
 	SortTTFT
@@ -583,11 +576,4 @@ func truncate(s string, n int) string {
 		return runewidth.Truncate(s, n-3, "") + "..."
 	}
 	return runewidth.Truncate(s, n, "")
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

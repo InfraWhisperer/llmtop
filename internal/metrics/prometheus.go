@@ -14,7 +14,7 @@ import (
 type MetricType int
 
 const (
-	MetricTypeUnknown   MetricType = iota
+	MetricTypeUnknown MetricType = iota
 	MetricTypeGauge
 	MetricTypeCounter
 	MetricTypeHistogram
@@ -69,8 +69,7 @@ func ParseText(text string) *ParsedMetrics {
 		}
 
 		// Check if this is a histogram component
-		if strings.HasSuffix(sample.Name, "_bucket") {
-			baseName := strings.TrimSuffix(sample.Name, "_bucket")
+		if baseName, ok := strings.CutSuffix(sample.Name, "_bucket"); ok {
 			key := histogramKey(baseName, sample.Labels)
 			h := getOrCreateHistogram(pm, key, baseName, sample.Labels)
 			if le, ok := sample.Labels["le"]; ok {
@@ -82,15 +81,13 @@ func ParseText(text string) *ParsedMetrics {
 					})
 				}
 			}
-		} else if strings.HasSuffix(sample.Name, "_count") {
-			baseName := strings.TrimSuffix(sample.Name, "_count")
+		} else if baseName, ok := strings.CutSuffix(sample.Name, "_count"); ok {
 			// Filter out le label for histogram lookup
 			labelsWithoutLE := filterLabel(sample.Labels, "le")
 			key := histogramKey(baseName, labelsWithoutLE)
 			h := getOrCreateHistogram(pm, key, baseName, labelsWithoutLE)
 			h.Count = sample.Value
-		} else if strings.HasSuffix(sample.Name, "_sum") {
-			baseName := strings.TrimSuffix(sample.Name, "_sum")
+		} else if baseName, ok := strings.CutSuffix(sample.Name, "_sum"); ok {
 			labelsWithoutLE := filterLabel(sample.Labels, "le")
 			key := histogramKey(baseName, labelsWithoutLE)
 			h := getOrCreateHistogram(pm, key, baseName, labelsWithoutLE)
@@ -126,8 +123,7 @@ func (pm *ParsedMetrics) GetGaugeAny(name string) (float64, map[string]string, b
 
 // GetHistogramQuantile returns the estimated quantile (0.0-1.0) for a histogram metric.
 func (pm *ParsedMetrics) GetHistogramQuantile(name string, labelFilter map[string]string, quantile float64) (float64, bool) {
-	for key, h := range pm.Histograms {
-		_ = key
+	for _, h := range pm.Histograms {
 		if h.Name == name && matchLabels(h.Labels, labelFilter) {
 			return estimateQuantile(h.Buckets, h.Count, quantile), true
 		}
@@ -256,7 +252,7 @@ func ComputeCDFPoints(buckets []HistogramBucket, totalCount float64, maxLatencyM
 	})
 	step := maxLatencyMs / 9.0
 	var prev float64
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		latencyMs := step * float64(i)
 		latencySec := latencyMs / 1000.0
 		count := cdfBucketCountAtLatency(sorted, totalCount, latencySec)
@@ -341,7 +337,7 @@ func parseSampleLine(line string) (Sample, bool) {
 	var nameAndLabels, valueStr string
 
 	// Find where labels end: look for } or first space if no labels
-	if idx := strings.Index(line, "{"); idx >= 0 {
+	if strings.Contains(line, "{") {
 		closeIdx := strings.Index(line, "}")
 		if closeIdx < 0 {
 			return s, false

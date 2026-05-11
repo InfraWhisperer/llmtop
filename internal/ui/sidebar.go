@@ -90,11 +90,8 @@ func renderAnomalySection(worker *metrics.WorkerMetrics, anomaly AnomalyGetter, 
 	var sb strings.Builder
 	sb.WriteString(styleSidebarHeader.Render("ANOMALIES"))
 	sb.WriteString("\n")
-	limit := 3
-	if len(details) < limit {
-		limit = len(details)
-	}
-	for i := 0; i < limit; i++ {
+	limit := min(len(details), 3)
+	for i := range limit {
 		d := details[i]
 		sign := "+"
 		if d.Sigma < 0 {
@@ -173,18 +170,12 @@ func renderGPUCard(g *metrics.GPUInfo, width int) string {
 	utilStr := fmt.Sprintf("%.0f%%", g.UtilPct)
 	utilStyle := GPUUtilStyle(g.UtilPct)
 
-	gap := width - len(label) - len(utilStr)
-	if gap < 1 {
-		gap = 1
-	}
+	gap := max(width-len(label)-len(utilStr), 1)
 	sb.WriteString(styleSidebarValue.Render(label) + strings.Repeat(" ", gap) + utilStyle.Render(utilStr))
 	sb.WriteString("\n")
 
 	// SM util bar
-	barWidth := width
-	if barWidth > 24 {
-		barWidth = 24
-	}
+	barWidth := min(width, 24)
 	sb.WriteString(RenderKVBar(g.UtilPct, barWidth))
 	sb.WriteString("\n")
 
@@ -227,10 +218,7 @@ func sidebarMetricRow(label, value string, width int) string {
 }
 
 func sidebarMetricRowPlain(label, value string, width int) string {
-	gap := width - len(label) - len(value)
-	if gap < 1 {
-		gap = 1
-	}
+	gap := max(width-len(label)-len(value), 1)
 	return styleSidebarLabel.Render(label) + strings.Repeat(" ", gap) + styleSidebarValue.Render(value) + "\n"
 }
 
@@ -263,10 +251,7 @@ func renderKVTierSection(worker *metrics.WorkerMetrics, width int) string {
 	sb.WriteString(styleSidebarHeader.Render("KV TIERS · " + shortName))
 	sb.WriteString("\n")
 
-	barWidth := width - 12 // room for label + pct
-	if barWidth < 6 {
-		barWidth = 6
-	}
+	barWidth := max(width-12, 6) // room for label + pct
 
 	// GPU HBM tier (always shown)
 	sb.WriteString(renderTierRow("GPU HBM", worker.KVCacheUsagePct, barWidth, width))
@@ -331,13 +316,8 @@ func renderEventSection(events []metrics.Event, width, maxHeight int) string {
 	}
 
 	// Show events in reverse chronological order (newest first)
-	maxEvents := maxHeight / 2 // rough estimate of space available
-	if maxEvents > len(events) {
-		maxEvents = len(events)
-	}
-	if maxEvents < 1 {
-		maxEvents = 1
-	}
+	// rough estimate of space available
+	maxEvents := max(min(maxHeight/2, len(events)), 1)
 
 	for i := len(events) - 1; i >= len(events)-maxEvents; i-- {
 		e := events[i]

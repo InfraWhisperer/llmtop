@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"maps"
 	"sync"
 	"time"
 )
@@ -42,9 +43,7 @@ func SnapshotWorker(w *WorkerMetrics) WorkerMetrics {
 	cp.GenTokHistory = nil
 	if w.TenantReqs != nil {
 		m := make(map[string]float64, len(w.TenantReqs))
-		for k, v := range w.TenantReqs {
-			m[k] = v
-		}
+		maps.Copy(m, w.TenantReqs)
 		cp.TenantReqs = m
 	}
 	return cp
@@ -154,10 +153,7 @@ func (r *RingBuffer) SparklineFor(endpoint string, n int) []float64 {
 	if r.len == 0 {
 		return nil
 	}
-	limit := n
-	if limit > r.len {
-		limit = r.len
-	}
+	limit := min(n, r.len)
 	// Walk from oldest of the last `limit` frames forward.
 	out := make([]float64, 0, limit)
 	for i := limit - 1; i >= 0; i-- {

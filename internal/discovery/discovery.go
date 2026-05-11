@@ -137,7 +137,7 @@ func detectBackend(body string) metrics.Backend {
 	hasCachePerc := false
 	hasTTFT := false
 
-	for _, line := range strings.Split(body, "\n") {
+	for line := range strings.SplitSeq(body, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "#") {
 			continue

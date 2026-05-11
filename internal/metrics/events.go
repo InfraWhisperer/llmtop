@@ -10,7 +10,7 @@ import (
 type EventSeverity int
 
 const (
-	SeverityInfo  EventSeverity = iota
+	SeverityInfo EventSeverity = iota
 	SeverityOK
 	SeverityWarn
 	SeverityError
@@ -53,7 +53,7 @@ func NewEventRing(capacity int) *EventRing {
 }
 
 // Push adds an event, dropping the oldest if at capacity.
-func (r *EventRing) Push(severity EventSeverity, format string, args ...interface{}) {
+func (r *EventRing) Push(severity EventSeverity, format string, args ...any) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	e := Event{
