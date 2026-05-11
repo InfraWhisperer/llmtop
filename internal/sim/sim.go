@@ -200,8 +200,12 @@ func (s *Simulator) Start() error {
 			if err != nil {
 				return fmt.Errorf("listen worker %s: %w", w.Name, err)
 			}
-			w.Port = ln.Addr().(*net.TCPAddr).Port
 		}
+		// Always reflect the actual bound port back onto the worker. The
+		// initial-port-zero case (default PortBase=0) succeeds on the first
+		// Listen and used to skip this update, leaving w.Port=0 and breaking
+		// any caller that needed it (e.g. TestWorkerMetricsEndpoint).
+		w.Port = ln.Addr().(*net.TCPAddr).Port
 		srv := &http.Server{Handler: mux}
 		s.workerServers = append(s.workerServers, srv)
 		s.workerListeners = append(s.workerListeners, ln)
