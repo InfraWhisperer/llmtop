@@ -349,7 +349,9 @@ func renderTableHeader(sortCol SortColumn, epW, modelW int) string {
 		{"TTFT P99", colTTFT, SortTTFT},
 		{"ITL P99", colITL, SortNone},
 		{"HIT%", colHit, SortHitRate},
-		{"TOK/S", colTok, SortTokPerSec},
+		// Generation only: the column must be readable at a glance as decode
+		// throughput (issue #15). SortTokPerSec still ranks by prompt+gen sum.
+		{"GEN t/s", colTok, SortTokPerSec},
 	}
 
 	var parts []string
@@ -431,7 +433,7 @@ func renderWorkerRowInner(w *metrics.WorkerMetrics, selected bool, epW, modelW i
 	ttftPlain := formatTTFT(w.TTFT_P99, colTTFT)
 	itlPlain := formatTTFT(w.ITL_P99, colITL)
 	hitPlain := formatHitRate(w.CacheHitRatePct, colHit)
-	tokPlain := formatTokPerSec(w.GenTokPerSec+w.PromptTokPerSec, colTok)
+	tokPlain := formatTokPerSec(w.GenTokPerSec, colTok)
 
 	if selected {
 		plain := "  " + dot + " " + gutter + " " + rolePlain + " " + epStr + " " + backendPlain + " " + modelStr + " " +
@@ -452,7 +454,7 @@ func renderWorkerRowInner(w *metrics.WorkerMetrics, selected bool, epW, modelW i
 		ttftStyle(w.TTFT_P99, ttftPlain) + " " +
 		ttftStyle(w.ITL_P99, itlPlain) + " " +
 		hitRateStyle(w.CacheHitRatePct, hitPlain) + " " +
-		tokPerSecStyle(w.GenTokPerSec+w.PromptTokPerSec, tokPlain)
+		tokPerSecStyle(w.GenTokPerSec, tokPlain)
 }
 
 // --- Plain formatting functions (no ANSI, just padded strings) ---

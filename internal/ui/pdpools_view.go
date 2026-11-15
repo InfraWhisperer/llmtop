@@ -136,8 +136,10 @@ func renderPrefillCard(w *metrics.WorkerMetrics, cardWidth int) string {
 	}
 	lines = append(lines, cardRow("KV xfer lat", xferStr, innerWidth))
 
-	tokTotal := w.PromptTokPerSec + w.GenTokPerSec
-	lines = append(lines, cardRow("Tok/s out", formatThroughput(tokTotal), innerWidth))
+	// Prefill side, split by whether tokens were computed or reused from the
+	// prefix cache — the cache number is accounting, not compute (issue #15).
+	lines = append(lines, cardRow("Pre compute t/s", formatThroughput(w.PrefillComputeTokPerSec), innerWidth))
+	lines = append(lines, cardRow("Pre cache t/s", formatThroughput(w.PrefillCacheTokPerSec), innerWidth))
 
 	content := strings.Join(lines, "\n")
 
@@ -281,10 +283,10 @@ func computeIdealRatio(prefill, decode []*metrics.WorkerMetrics) string {
 
 	var sumPrefillTok, sumDecodeTok float64
 	for _, w := range prefill {
-		sumPrefillTok += w.PromptTokPerSec + w.GenTokPerSec
+		sumPrefillTok += w.PromptTokPerSec
 	}
 	for _, w := range decode {
-		sumDecodeTok += w.PromptTokPerSec + w.GenTokPerSec
+		sumDecodeTok += w.GenTokPerSec
 	}
 
 	if sumDecodeTok == 0 {

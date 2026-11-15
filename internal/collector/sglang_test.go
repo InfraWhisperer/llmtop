@@ -194,6 +194,66 @@ func TestSGLangRate_UsesCounterTimestamp(t *testing.T) {
 	}
 }
 
+// Issue #15: prefill_cache tokens are reused from the radix cache, not
+// computed. Reporting them inside the prompt/gen rate is what produced the
+// 25k+ tok/s spikes, so they must land in their own field and be subtracted
+// from the prefill-compute rate.
+func TestSGLangRate_PrefillCacheSplit(t *testing.T) {
+	pm := metrics.ParseText(sampleSGLangMetricsRealtime)
+	prev := &metrics.WorkerMetrics{Online: true, LastSeen: time.Now().Add(-2 * time.Second)}
+	prevCounters := counterState{
+		promptTokensTotal:       600, // compute 550 + cache 50
+		prefillCacheTokensTotal: 50,
+		genTokensTotal:          2000,
+		ts:                      time.Now().Add(-2 * time.Second),
+	}
+	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:30000", Online: true}
+	parseSGLangMetrics(m, prev, prevCounters, pm)
+
+	// prompt = (600+100)-600 = 100 over 2s = ~50 tok/s
+	if m.PromptTokPerSec < 45 || m.PromptTokPerSec > 55 {
+		t.Errorf("PromptTokPerSec = %f, want ~50", m.PromptTokPerSec)
+	}
+	// cache = 100-50 = 50 over 2s = ~25 tok/s, kept out of the compute rate
+	if m.PrefillCacheTokPerSec < 22.5 || m.PrefillCacheTokPerSec > 27.5 {
+		t.Errorf("PrefillCacheTokPerSec = %f, want ~25", m.PrefillCacheTokPerSec)
+	}
+	if m.PrefillComputeTokPerSec < 22.5 || m.PrefillComputeTokPerSec > 27.5 {
+		t.Errorf("PrefillComputeTokPerSec = %f, want ~25 (prompt-cache)", m.PrefillComputeTokPerSec)
+	}
+	// The bug: gen must stay the decode rate, unpolluted by the cache burst.
+	if m.GenTokPerSec < 450 || m.GenTokPerSec > 550 {
+		t.Errorf("GenTokPerSec = %f, want ~500 (decode only)", m.GenTokPerSec)
+	}
+	// Re-derivable invariant: prompt == compute + cache.
+	if !approxEqual(m.PromptTokPerSec, m.PrefillComputeTokPerSec+m.PrefillCacheTokPerSec, 1.0) {
+		t.Errorf("prompt %f != compute %f + cache %f",
+			m.PromptTokPerSec, m.PrefillComputeTokPerSec, m.PrefillCacheTokPerSec)
+	}
+}
+
+// The finished-request fallback has no cache split at all, so it must report
+// zero cache tokens and leave the whole prompt side as compute rather than
+// inventing one.
+func TestSGLangRate_FallbackHasNoCacheSplit(t *testing.T) {
+	pm := metrics.ParseText(sampleSGLangMetricsMultiSeries)
+	prev := &metrics.WorkerMetrics{Online: true, LastSeen: time.Now().Add(-2 * time.Second)}
+	prevCounters := counterState{
+		promptTokensTotal: 8000,
+		genTokensTotal:    21000,
+		ts:                time.Now().Add(-2 * time.Second),
+	}
+	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:30000", Online: true}
+	parseSGLangMetrics(m, prev, prevCounters, pm)
+
+	if m.PrefillCacheTokPerSec != 0 {
+		t.Errorf("PrefillCacheTokPerSec = %f, want 0 (fallback has no split)", m.PrefillCacheTokPerSec)
+	}
+	if !approxEqual(m.PrefillComputeTokPerSec, m.PromptTokPerSec, 0.001) {
+		t.Errorf("PrefillComputeTokPerSec = %f, want == PromptTokPerSec %f", m.PrefillComputeTokPerSec, m.PromptTokPerSec)
+	}
+}
+
 func TestDetectSGLang(t *testing.T) {
 	pm := metrics.ParseText(sampleSGLangMetrics)
 	p := &sglangParser{}

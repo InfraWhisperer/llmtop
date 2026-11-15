@@ -19,8 +19,11 @@ import "time"
 type counterState struct {
 	promptTokensTotal float64
 	genTokensTotal    float64
-	preemptionsTotal  float64
-	tenantReqTotals   map[string]float64
+	// Raw counter value behind PrefillCacheTokPerSec, tracked separately so a
+	// prefix-cache burst never contaminates the prefill-compute rate (issue #15).
+	prefillCacheTokensTotal float64
+	preemptionsTotal        float64
+	tenantReqTotals         map[string]float64
 	// ts is when these counter values were sampled. Rate deltas MUST be
 	// divided by time.Since(ts), not time.Since(prev.LastSeen): in pollWorker
 	// the prev snapshot lags prevCounters by one poll (prev is N-2 while

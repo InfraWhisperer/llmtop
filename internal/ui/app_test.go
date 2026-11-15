@@ -1,13 +1,38 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/InfraWhisperer/llmtop/internal/collector"
 	"github.com/InfraWhisperer/llmtop/internal/metrics"
+	tea "github.com/charmbracelet/bubbletea"
 )
+
+// Issue #15: prefill cache tokens are reused, not computed, so they get their
+// own row and only when the backend actually reports a split.
+func TestRenderThroughputDetailRows(t *testing.T) {
+	split := renderThroughputDetailRows(&metrics.WorkerMetrics{
+		PromptTokPerSec:         60,
+		GenTokPerSec:            100,
+		PrefillComputeTokPerSec: 40,
+		PrefillCacheTokPerSec:   20,
+	})
+	for _, want := range []string{"Prefill Compute Tokens/s", "Prefill Cache Tokens/s", "40.0", "20.0"} {
+		if !strings.Contains(split, want) {
+			t.Errorf("split detail missing %q", want)
+		}
+	}
+
+	noSplit := renderThroughputDetailRows(&metrics.WorkerMetrics{
+		PromptTokPerSec: 100,
+		GenTokPerSec:    200,
+	})
+	if strings.Contains(noSplit, "Prefill Cache Tokens/s") {
+		t.Errorf("backend without a cache split should not render a cache row, got %q", noSplit)
+	}
+}
 
 // stubDCGMCollector returns a *collector.DCGMCollector that won't hit the network.
 // Used only to make dcgmCollector non-nil so the 'g' key handler activates.

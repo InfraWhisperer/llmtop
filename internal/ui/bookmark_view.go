@@ -86,7 +86,7 @@ func RenderBookmarkCompare(workers []*metrics.WorkerMetrics, ring *metrics.RingB
 		writeMetric(&rowBuilders[i], "ITL  P99", fmtMs(w.ITL_P99), colWidth)
 		writeMetric(&rowBuilders[i], "KV%     ", fmt.Sprintf("%.0f%%", w.KVCacheUsagePct), colWidth)
 		writeMetric(&rowBuilders[i], "Queue   ", fmt.Sprintf("%d", w.RequestsWaiting), colWidth)
-		writeMetric(&rowBuilders[i], "Tok/s   ", fmt.Sprintf("%.0f", w.PromptTokPerSec+w.GenTokPerSec), colWidth)
+		writeMetric(&rowBuilders[i], "Gen t/s ", fmt.Sprintf("%.0f", w.GenTokPerSec), colWidth)
 		rowBuilders[i].WriteString("\n")
 		if len(c.spark) > 0 {
 			rowBuilders[i].WriteString(StyleMetricNA.Render("TTFT 60s"))

@@ -69,11 +69,17 @@ func parseSGLangMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, p
 	// stored with the previous counter snapshot, not prev.LastSeen, which
 	// lags one poll behind (see counterState.rateWindow).
 	now := time.Now()
-	p, g, okP, okG := sglangTokenCounters(pm)
+	p, g, pc, okP, okG := sglangTokenCounters(pm)
 	if prev != nil && prev.Online {
 		if dt, ok := prevCounters.rateWindow(now); ok {
 			if okP {
 				m.PromptTokPerSec = max(0.0, (p-prevCounters.promptTokensTotal)/dt)
+				// Tokens reused from the radix cache: an accounting number, not a
+				// compute rate. Kept in its own field so the header never renders
+				// it as generation (issue #15).
+				cache := max(0.0, (pc-prevCounters.prefillCacheTokensTotal)/dt)
+				m.PrefillCacheTokPerSec = cache
+				m.PrefillComputeTokPerSec = max(0.0, m.PromptTokPerSec-cache)
 			}
 			if okG {
 				m.GenTokPerSec = max(0.0, (g-prevCounters.genTokensTotal)/dt)
@@ -81,21 +87,27 @@ func parseSGLangMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, p
 		}
 	}
 
-	return counterState{promptTokensTotal: p, genTokensTotal: g, ts: now}
+	return counterState{
+		promptTokensTotal:       p,
+		genTokensTotal:          g,
+		prefillCacheTokensTotal: pc,
+		ts:                      now,
+	}
 }
 
-// sglangTokenCounters returns summed prompt/generation token counters from pm
-// and per-value found flags. Prefers sglang:realtime_tokens_total (updated
-// every log interval; prefill = prefill_compute + prefill_cache, decode =
-// generation), falling back to the finished-request counters summed across
-// all is_streaming series. See issue #15.
-func sglangTokenCounters(pm *metrics.ParsedMetrics) (prompt, gen float64, okP, okG bool) {
+// sglangTokenCounters returns summed prompt/generation token counters, plus the
+// raw prefix-cache token counter behind the prompt side, and per-value found
+// flags. Prefers sglang:realtime_tokens_total (updated every log interval;
+// prompt = prefill_compute + prefill_cache, decode = generation), falling back
+// to the finished-request counters summed across all is_streaming series — that
+// fallback has no cache split, so it reports pc=0. See issue #15.
+func sglangTokenCounters(pm *metrics.ParsedMetrics) (prompt, gen, prefillCache float64, okP, okG bool) {
 	if g, ok := pm.GetGaugeSum("sglang:realtime_tokens_total", map[string]string{"mode": "decode"}); ok {
 		pc, _ := pm.GetGaugeSum("sglang:realtime_tokens_total", map[string]string{"mode": "prefill_compute"})
 		pcache, _ := pm.GetGaugeSum("sglang:realtime_tokens_total", map[string]string{"mode": "prefill_cache"})
-		return pc + pcache, g, true, true
+		return pc + pcache, g, pcache, true, true
 	}
 	prompt, okP = pm.GetGaugeSum("sglang:prompt_tokens_total", nil)
 	gen, okG = pm.GetGaugeSum("sglang:generation_tokens_total", nil)
-	return prompt, gen, okP, okG
+	return prompt, gen, 0, okP, okG
 }

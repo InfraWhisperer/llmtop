@@ -49,6 +49,56 @@ func TestComputeFleetSummary(t *testing.T) {
 	}
 }
 
+// Issue #15: the prompt side must not be folded into a single fleet number.
+// A backend that reports a prefix-cache split (SGLang realtime_tokens_total)
+// contributes its cache rate separately; one that does not (vLLM here) has its
+// whole prompt side counted as compute, so the header's prefill segment stays
+// meaningful instead of reading 0.
+func TestComputeFleetSummary_PrefillSplit(t *testing.T) {
+	workers := []*WorkerMetrics{
+		{
+			Online:                  true,
+			LastSeen:                time.Now(),
+			GenTokPerSec:            100.0,
+			PromptTokPerSec:         60.0, // = compute 40 + cache 20
+			PrefillComputeTokPerSec: 40.0,
+			PrefillCacheTokPerSec:   20.0,
+		},
+		{
+			Online:          true,
+			LastSeen:        time.Now(),
+			GenTokPerSec:    200.0,
+			PromptTokPerSec: 100.0, // no split reported
+		},
+		{
+			Online:                  false, // offline: contributes nothing
+			GenTokPerSec:            9999.0,
+			PrefillCacheTokPerSec:   9999.0,
+			PrefillComputeTokPerSec: 9999.0,
+		},
+	}
+
+	summary := ComputeFleetSummary(workers)
+
+	// TotalTokPerSec keeps its old meaning (prompt+gen) for the sparkline/--once.
+	if summary.TotalTokPerSec != 460.0 {
+		t.Errorf("TotalTokPerSec = %f, want 460.0", summary.TotalTokPerSec)
+	}
+	if summary.GenTokPerSec != 300.0 {
+		t.Errorf("GenTokPerSec = %f, want 300.0", summary.GenTokPerSec)
+	}
+	if summary.PrefillComputeTokPerSec != 140.0 {
+		t.Errorf("PrefillComputeTokPerSec = %f, want 140.0 (40 split + 100 no-split)", summary.PrefillComputeTokPerSec)
+	}
+	if summary.PrefillCacheTokPerSec != 20.0 {
+		t.Errorf("PrefillCacheTokPerSec = %f, want 20.0", summary.PrefillCacheTokPerSec)
+	}
+	// The three header segments must add up to the total, never exceed it.
+	if got := summary.GenTokPerSec + summary.PrefillComputeTokPerSec + summary.PrefillCacheTokPerSec; got != summary.TotalTokPerSec {
+		t.Errorf("segments sum to %f, want TotalTokPerSec %f", got, summary.TotalTokPerSec)
+	}
+}
+
 func TestComputeFleetSummary_Empty(t *testing.T) {
 	summary := ComputeFleetSummary(nil)
 	if summary.TotalWorkers != 0 {

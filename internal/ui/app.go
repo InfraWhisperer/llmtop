@@ -1954,8 +1954,7 @@ func (m Model) renderDetail() string {
 
 	// Throughput metrics
 	sb.WriteString(StyleDetailSection.Render("Throughput") + "\n")
-	sb.WriteString(renderDetailRow("Prompt Tokens/s", fmt.Sprintf("%.1f", w.PromptTokPerSec)))
-	sb.WriteString(renderDetailRow("Generation Tokens/s", fmt.Sprintf("%.1f", w.GenTokPerSec)))
+	sb.WriteString(renderThroughputDetailRows(w))
 	sb.WriteString("\n")
 
 	// TTFT sparkline history
@@ -2011,6 +2010,21 @@ func (m Model) renderHelp() string {
 			StyleHelpOverlay.Render(sb.String()),
 		),
 	)
+}
+
+// renderThroughputDetailRows renders the prefill/generation breakdown for the
+// detail pane. Prefill compute and prefill cache are separate rows: cache-side
+// tokens were reused from the prefix/radix cache rather than computed, so
+// mixing them into a prompt rate produced 25k+ tok/s spikes (issue #15).
+func renderThroughputDetailRows(w *metrics.WorkerMetrics) string {
+	var sb strings.Builder
+	sb.WriteString(renderDetailRow("Prefill Compute Tokens/s", fmt.Sprintf("%.1f", w.PrefillComputeTokPerSec)))
+	if w.PrefillCacheTokPerSec > 0 {
+		sb.WriteString(renderDetailRow("Prefill Cache Tokens/s", fmt.Sprintf("%.1f", w.PrefillCacheTokPerSec)))
+	}
+	sb.WriteString(renderDetailRow("Prompt Tokens/s", fmt.Sprintf("%.1f", w.PromptTokPerSec)))
+	sb.WriteString(renderDetailRow("Generation Tokens/s", fmt.Sprintf("%.1f", w.GenTokPerSec)))
+	return sb.String()
 }
 
 func renderDetailRow(label, value string) string {

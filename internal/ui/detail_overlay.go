@@ -83,8 +83,15 @@ func RenderDetailOverlay(w *metrics.WorkerMetrics, gpus []*metrics.GPUInfo, widt
 		))
 	}
 	sb.WriteString(overlayMetricLine(
-		"Tok/s", fmt.Sprintf("%.0f", w.PromptTokPerSec+w.GenTokPerSec),
+		"Gen t/s", fmt.Sprintf("%.0f", w.GenTokPerSec),
 		"Queue", fmt.Sprintf("%d", w.RequestsWaiting),
+		innerWidth,
+	))
+	// Prefill side kept apart from generation: cache-side tokens are reused from
+	// the prefix/radix cache, not computed (issue #15).
+	sb.WriteString(overlayMetricLine(
+		"Pre t/s", fmt.Sprintf("%.0f", w.PrefillComputeTokPerSec),
+		"Pre cache t/s", fmt.Sprintf("%.0f", w.PrefillCacheTokPerSec),
 		innerWidth,
 	))
 	sb.WriteString(overlayMetricLine(

@@ -7,12 +7,12 @@ import "time"
 type Backend string
 
 const (
-	BackendVLLM    Backend = "vLLM"
-	BackendSGLang  Backend = "SGLang"
-	BackendLMCache Backend = "LMCache"
-	BackendNIM     Backend = "NIM"
-	BackendTGI     Backend = "TGI"
-	BackendTRTLLM  Backend = "TRT-LLM"
+	BackendVLLM     Backend = "vLLM"
+	BackendSGLang   Backend = "SGLang"
+	BackendLMCache  Backend = "LMCache"
+	BackendNIM      Backend = "NIM"
+	BackendTGI      Backend = "TGI"
+	BackendTRTLLM   Backend = "TRT-LLM"
 	BackendTriton   Backend = "Triton"
 	BackendLlamaCpp Backend = "llama.cpp"
 	BackendLiteLLM  Backend = "LiteLLM"
@@ -24,10 +24,11 @@ const (
 // All values are in milliseconds. Zero means absent/not-reported.
 //
 // Invariants:
-//   P50 <= P95 <= P99 (all non-negative; 0 means absent)
-//   CDFPoints[i] <= CDFPoints[i+1] for all i (monotonically non-decreasing)
-//   CDFPoints[i] in [0.0, 1.0]
-//   All elements are 0 when P99 == 0
+//
+//	P50 <= P95 <= P99 (all non-negative; 0 means absent)
+//	CDFPoints[i] <= CDFPoints[i+1] for all i (monotonically non-decreasing)
+//	CDFPoints[i] in [0.0, 1.0]
+//	All elements are 0 when P99 == 0
 type LatencySnapshot struct {
 	P50       float64     `json:"p50"`
 	P95       float64     `json:"p95"`
@@ -85,8 +86,18 @@ type WorkerMetrics struct {
 	KVTransferP99Ms float64 `json:"kv_transfer_p99_ms"`
 
 	// Throughput
+	// PromptTokPerSec is the total prompt-side rate. For backends that split
+	// it (SGLang realtime_tokens_total), it equals PrefillComputeTokPerSec +
+	// PrefillCacheTokPerSec; for the rest the split fields are 0 and the whole
+	// prompt rate was actually computed.
 	PromptTokPerSec float64 `json:"prompt_tok_per_sec"`
 	GenTokPerSec    float64 `json:"gen_tok_per_sec"`
+	// Tokens/s taken from the prefix/radix cache rather than recomputed. Not a
+	// compute throughput: reporting it mixed into gen/prompt totals produced
+	// 25k+ tok/s spikes against a real ~150 tok/s generation rate (issue #15).
+	PrefillCacheTokPerSec float64 `json:"prefill_cache_tok_per_sec"`
+	// Tokens/s of prompt prefill that was actually computed.
+	PrefillComputeTokPerSec float64 `json:"prefill_compute_tok_per_sec"`
 
 	// KV eviction rate (preemptions per second, computed from counter)
 	EvictPerSec float64 `json:"evict_per_sec"`
@@ -113,8 +124,15 @@ type FleetSummary struct {
 	AvgKVPercGPU   float64 `json:"avg_kv_perc_gpu"` // cluster-wide average GPU KV cache usage (0-100)
 	P99TTFT        float64 `json:"p99_ttft"`
 	TotalTokPerSec float64 `json:"total_tok_per_sec"`
-	PrefillCount   int     `json:"prefill_count"`
-	DecodeCount    int     `json:"decode_count"`
+	// Per-segment fleet rates, summed over online workers. TotalTokPerSec stays
+	// the prompt+gen sum (sparkline / sort / --once); the header renders the
+	// three segments separately so a prefill-cache burst is never read as
+	// generation throughput.
+	GenTokPerSec            float64 `json:"gen_tok_per_sec"`
+	PrefillComputeTokPerSec float64 `json:"prefill_compute_tok_per_sec"`
+	PrefillCacheTokPerSec   float64 `json:"prefill_cache_tok_per_sec"`
+	PrefillCount            int     `json:"prefill_count"`
+	DecodeCount             int     `json:"decode_count"`
 }
 
 // ComputeFleetSummary computes aggregate stats from a slice of worker metrics.
@@ -137,6 +155,15 @@ func ComputeFleetSummary(workers []*WorkerMetrics) FleetSummary {
 		if w.Online {
 			s.OnlineWorkers++
 			s.TotalTokPerSec += w.PromptTokPerSec + w.GenTokPerSec
+			s.GenTokPerSec += w.GenTokPerSec
+			// Backends without a cache split report the whole prompt side as
+			// compute, so the header's prefill segment stays meaningful.
+			if w.PrefillCacheTokPerSec > 0 || w.PrefillComputeTokPerSec > 0 {
+				s.PrefillComputeTokPerSec += w.PrefillComputeTokPerSec
+				s.PrefillCacheTokPerSec += w.PrefillCacheTokPerSec
+			} else {
+				s.PrefillComputeTokPerSec += w.PromptTokPerSec
+			}
 			if w.CacheHitRatePct > 0 {
 				cacheHitSum += w.CacheHitRatePct
 				cacheCount++
