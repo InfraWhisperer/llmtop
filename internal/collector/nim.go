@@ -77,33 +77,31 @@ func parseNIMMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, prev
 		[]string{"time_per_output_token_seconds"},
 	)
 
-	// Token throughput: counter-delta rate computation.
+	// Token throughput: counter-delta rate computation over summed
+	// series, with dt from the previous counter snapshot (issue #15).
+	now := time.Now()
+	prompt, okPrompt := pm.GetGaugeSum("prompt_tokens_total", nil)
+	gen, okGen := pm.GetGaugeSum("generation_tokens_total", nil)
 	if prev != nil && prev.Online {
-		dt := time.Since(prev.LastSeen).Seconds()
-		if dt > 0 {
-			if v, _, ok := pm.GetGaugeAny("prompt_tokens_total"); ok {
-				m.PromptTokPerSec = (v - prevCounters.promptTokensTotal) / dt
-				if m.PromptTokPerSec < 0 {
-					m.PromptTokPerSec = 0
-				}
+		if dt, ok := prevCounters.rateWindow(now); ok {
+			if okPrompt {
+				m.PromptTokPerSec = max(0.0, (prompt-prevCounters.promptTokensTotal)/dt)
 			}
-			if v, _, ok := pm.GetGaugeAny("generation_tokens_total"); ok {
-				m.GenTokPerSec = (v - prevCounters.genTokensTotal) / dt
-				if m.GenTokPerSec < 0 {
-					m.GenTokPerSec = 0
-				}
+			if okGen {
+				m.GenTokPerSec = max(0.0, (gen-prevCounters.genTokensTotal)/dt)
 			}
 		}
 	}
 
-	// Store raw counters for next delta.
+	// Store summed raw counters (with sample timestamp) for next delta.
 	var counters counterState
-	if v, _, ok := pm.GetGaugeAny("prompt_tokens_total"); ok {
-		counters.promptTokensTotal = v
+	if okPrompt {
+		counters.promptTokensTotal = prompt
 	}
-	if v, _, ok := pm.GetGaugeAny("generation_tokens_total"); ok {
-		counters.genTokensTotal = v
+	if okGen {
+		counters.genTokensTotal = gen
 	}
+	counters.ts = now
 
 	return counters
 }

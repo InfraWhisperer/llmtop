@@ -81,6 +81,119 @@ func TestParseSGLangMetrics(t *testing.T) {
 	}
 }
 
+// Issue #15: sglang:{prompt,generation}_tokens_total carry an is_streaming
+// label → 2 series. GetGaugeAny returned only the first one; if the frozen
+// is_streaming="false" series came first, tokens/s showed a permanent 0.
+// All matching series must be summed before taking the delta.
+const sampleSGLangMetricsMultiSeries = `# TYPE sglang:num_running_reqs gauge
+sglang:num_running_reqs{model_name="Qwen/Qwen2.5-72B-Instruct"} 8.0
+# TYPE sglang:prompt_tokens_total counter
+sglang:prompt_tokens_total{model_name="Qwen/Qwen2.5-72B-Instruct",is_streaming="false"} 6000
+sglang:prompt_tokens_total{model_name="Qwen/Qwen2.5-72B-Instruct",is_streaming="true"} 2500
+# TYPE sglang:generation_tokens_total counter
+sglang:generation_tokens_total{model_name="Qwen/Qwen2.5-72B-Instruct",is_streaming="false"} 15000
+sglang:generation_tokens_total{model_name="Qwen/Qwen2.5-72B-Instruct",is_streaming="true"} 7000
+`
+
+// Issue #15: *_tokens_total only increment when a request finishes, producing
+// zeros + spikes during long generations. sglang:realtime_tokens_total is
+// updated every log interval and must be preferred when present.
+const sampleSGLangMetricsRealtime = `# TYPE sglang:num_running_reqs gauge
+sglang:num_running_reqs{model_name="Qwen/Qwen2.5-72B-Instruct"} 8.0
+# TYPE sglang:realtime_tokens_total counter
+sglang:realtime_tokens_total{model_name="m",mode="prefill_compute"} 600
+sglang:realtime_tokens_total{model_name="m",mode="prefill_cache"} 100
+sglang:realtime_tokens_total{model_name="m",mode="decode"} 3000
+# TYPE sglang:prompt_tokens_total counter
+sglang:prompt_tokens_total{model_name="m",is_streaming="false"} 500
+# TYPE sglang:generation_tokens_total counter
+sglang:generation_tokens_total{model_name="m",is_streaming="false"} 2000
+`
+
+func TestSGLangRate_MultiSeriesSum(t *testing.T) {
+	pm := metrics.ParseText(sampleSGLangMetricsMultiSeries)
+	prev := &metrics.WorkerMetrics{Online: true, LastSeen: time.Now().Add(-2 * time.Second)}
+	prevCounters := counterState{
+		promptTokensTotal: 7500,  // summed prev
+		genTokensTotal:    20000, // summed prev
+		ts:                time.Now().Add(-2 * time.Second),
+	}
+	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:30000", Online: true}
+	parseSGLangMetrics(m, prev, prevCounters, pm)
+	// summed prompt = 6000+2500 = 8500, delta 1000 over ~2s = ~500 tok/s
+	if m.PromptTokPerSec < 450 || m.PromptTokPerSec > 550 {
+		t.Errorf("PromptTokPerSec = %f, want ~500 (multi-series sum)", m.PromptTokPerSec)
+	}
+	// summed gen = 15000+7000 = 22000, delta 2000 over ~2s = ~1000 tok/s
+	if m.GenTokPerSec < 900 || m.GenTokPerSec > 1100 {
+		t.Errorf("GenTokPerSec = %f, want ~1000 (multi-series sum)", m.GenTokPerSec)
+	}
+}
+
+func TestSGLangRate_PrefersRealtimeTokens(t *testing.T) {
+	pm := metrics.ParseText(sampleSGLangMetricsRealtime)
+	prev := &metrics.WorkerMetrics{Online: true, LastSeen: time.Now().Add(-2 * time.Second)}
+	prevCounters := counterState{
+		promptTokensTotal: 500,
+		genTokensTotal:    2000,
+		ts:                time.Now().Add(-2 * time.Second),
+	}
+	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:30000", Online: true}
+	parseSGLangMetrics(m, prev, prevCounters, pm)
+	// realtime prompt = prefill_compute(600)+prefill_cache(100) = 700, delta 200/2s = 100
+	if m.PromptTokPerSec < 90 || m.PromptTokPerSec > 110 {
+		t.Errorf("PromptTokPerSec = %f, want ~100 (realtime_tokens_total)", m.PromptTokPerSec)
+	}
+	// realtime decode = 3000, delta 1000/2s = 500
+	if m.GenTokPerSec < 450 || m.GenTokPerSec > 550 {
+		t.Errorf("GenTokPerSec = %f, want ~500 (realtime_tokens_total)", m.GenTokPerSec)
+	}
+}
+
+func TestSGLangRate_FallsBackWhenNoRealtime(t *testing.T) {
+	pm := metrics.ParseText(sampleSGLangMetricsMultiSeries)
+	prev := &metrics.WorkerMetrics{Online: true, LastSeen: time.Now().Add(-2 * time.Second)}
+	prevCounters := counterState{
+		promptTokensTotal: 8000,
+		genTokensTotal:    21000,
+		ts:                time.Now().Add(-2 * time.Second),
+	}
+	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:30000", Online: true}
+	parseSGLangMetrics(m, prev, prevCounters, pm)
+	// fallback summed prompt 8500-8000=500/2s=250; gen 22000-21000=1000/2s=500
+	if m.PromptTokPerSec < 225 || m.PromptTokPerSec > 275 {
+		t.Errorf("PromptTokPerSec = %f, want ~250 (fallback)", m.PromptTokPerSec)
+	}
+	if m.GenTokPerSec < 450 || m.GenTokPerSec > 550 {
+		t.Errorf("GenTokPerSec = %f, want ~500 (fallback)", m.GenTokPerSec)
+	}
+}
+
+// Issue #15 cause 3: dt must come from the timestamp stored with the previous
+// counter snapshot, not prev.LastSeen (which lags one extra poll behind
+// prevCounters, halving every rate).
+func TestSGLangRate_UsesCounterTimestamp(t *testing.T) {
+	pm := metrics.ParseText(sampleSGLangMetrics)
+	prev := &metrics.WorkerMetrics{
+		Online:   true,
+		LastSeen: time.Now().Add(-4 * time.Second), // stale: one extra poll behind
+	}
+	prevCounters := counterState{
+		promptTokensTotal: 7500,
+		genTokensTotal:    20000,
+		ts:                time.Now().Add(-2 * time.Second), // actual counter age
+	}
+	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:30000", Online: true}
+	parseSGLangMetrics(m, prev, prevCounters, pm)
+	// delta 1000/2000 over 2s (ts), not 4s (LastSeen): ~500 / ~1000 tok/s.
+	if m.PromptTokPerSec < 450 || m.PromptTokPerSec > 550 {
+		t.Errorf("PromptTokPerSec = %f, want ~500 (dt from counter ts)", m.PromptTokPerSec)
+	}
+	if m.GenTokPerSec < 900 || m.GenTokPerSec > 1100 {
+		t.Errorf("GenTokPerSec = %f, want ~1000 (dt from counter ts)", m.GenTokPerSec)
+	}
+}
+
 func TestDetectSGLang(t *testing.T) {
 	pm := metrics.ParseText(sampleSGLangMetrics)
 	p := &sglangParser{}
@@ -95,6 +208,7 @@ func TestDetectSGLang(t *testing.T) {
 }
 
 func TestSGLangCounterState(t *testing.T) {
+	_ = counterState{ts: time.Now()} // ts field must exist (issue #15)
 	pm := metrics.ParseText(sampleSGLangMetrics)
 	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:30000", Online: true}
 
@@ -106,6 +220,11 @@ func TestSGLangCounterState(t *testing.T) {
 	}
 	if m.EvictionTotal != 0 {
 		t.Errorf("EvictionTotal = %f, want 0 (counters should not leak)", m.EvictionTotal)
+	}
+	// The snapshot must carry the poll timestamp so the next poll computes
+	// dt from it (issue #15).
+	if counters.ts.IsZero() {
+		t.Error("counters.ts is zero; want poll timestamp")
 	}
 	// Counter values should be in the returned counterState
 	if counters.promptTokensTotal != 8500 {
@@ -126,6 +245,8 @@ func TestSGLangRateCalculation(t *testing.T) {
 	prevCounters := counterState{
 		promptTokensTotal: 7500,
 		genTokensTotal:    20000,
+		// As of issue #15, dt comes from prevCounters.ts; LastSeen is stale by design.
+		ts: time.Now().Add(-2 * time.Second),
 	}
 
 	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:30000", Online: true}

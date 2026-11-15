@@ -111,6 +111,25 @@ func TestParseText_Empty(t *testing.T) {
 	}
 }
 
+func TestGetGaugeSum(t *testing.T) {
+	text := "sglang:prompt_tokens_total{model_name=\"m\",is_streaming=\"false\"} 6000\n" +
+		"sglang:prompt_tokens_total{model_name=\"m\",is_streaming=\"true\"} 2500\n" +
+		"sglang:num_running_reqs{model_name=\"m\"} 8\n"
+	pm := ParseText(text)
+	// Multi-series counters must sum every matching series (issue #15).
+	if v, ok := pm.GetGaugeSum("sglang:prompt_tokens_total", nil); !ok || v != 8500 {
+		t.Errorf("GetGaugeSum(prompt_tokens_total) = %v, %v; want 8500, true", v, ok)
+	}
+	// Label filter restricts which series are summed.
+	if v, ok := pm.GetGaugeSum("sglang:prompt_tokens_total", map[string]string{"is_streaming": "true"}); !ok || v != 2500 {
+		t.Errorf("GetGaugeSum(filtered) = %v, %v; want 2500, true", v, ok)
+	}
+	// Missing metric reports found=false.
+	if _, ok := pm.GetGaugeSum("sglang:nope_total", nil); ok {
+		t.Error("GetGaugeSum(missing) reported found=true")
+	}
+}
+
 func TestEstimateQuantile_Empty(t *testing.T) {
 	result := estimateQuantile(nil, 0, 0.99)
 	if result != 0 {

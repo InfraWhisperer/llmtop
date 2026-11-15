@@ -59,33 +59,43 @@ func parseSGLangMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, p
 		[]string{"sglang:time_per_output_token_seconds"},
 	)
 
-	// Token throughput rates
+	// Token throughput rates (issue #15).
+	//
+	// sglang:{prompt,generation}_tokens_total carry an is_streaming label
+	// (2 series) and only increment when a request finishes, so taking the
+	// first series froze rates at 0 and long generations showed zero+spike
+	// patterns. We sum all matching series and prefer the per-log-interval
+	// sglang:realtime_tokens_total when present. dt comes from the timestamp
+	// stored with the previous counter snapshot, not prev.LastSeen, which
+	// lags one poll behind (see counterState.rateWindow).
+	now := time.Now()
+	p, g, okP, okG := sglangTokenCounters(pm)
 	if prev != nil && prev.Online {
-		dt := time.Since(prev.LastSeen).Seconds()
-		if dt > 0 {
-			if v, _, ok := pm.GetGaugeAny("sglang:prompt_tokens_total"); ok {
-				m.PromptTokPerSec = (v - prevCounters.promptTokensTotal) / dt
-				if m.PromptTokPerSec < 0 {
-					m.PromptTokPerSec = 0
-				}
+		if dt, ok := prevCounters.rateWindow(now); ok {
+			if okP {
+				m.PromptTokPerSec = max(0.0, (p-prevCounters.promptTokensTotal)/dt)
 			}
-			if v, _, ok := pm.GetGaugeAny("sglang:generation_tokens_total"); ok {
-				m.GenTokPerSec = (v - prevCounters.genTokensTotal) / dt
-				if m.GenTokPerSec < 0 {
-					m.GenTokPerSec = 0
-				}
+			if okG {
+				m.GenTokPerSec = max(0.0, (g-prevCounters.genTokensTotal)/dt)
 			}
 		}
 	}
 
-	// Store raw counters for next rate calculation
-	var counters counterState
-	if v, _, ok := pm.GetGaugeAny("sglang:prompt_tokens_total"); ok {
-		counters.promptTokensTotal = v
-	}
-	if v, _, ok := pm.GetGaugeAny("sglang:generation_tokens_total"); ok {
-		counters.genTokensTotal = v
-	}
+	return counterState{promptTokensTotal: p, genTokensTotal: g, ts: now}
+}
 
-	return counters
+// sglangTokenCounters returns summed prompt/generation token counters from pm
+// and per-value found flags. Prefers sglang:realtime_tokens_total (updated
+// every log interval; prefill = prefill_compute + prefill_cache, decode =
+// generation), falling back to the finished-request counters summed across
+// all is_streaming series. See issue #15.
+func sglangTokenCounters(pm *metrics.ParsedMetrics) (prompt, gen float64, okP, okG bool) {
+	if g, ok := pm.GetGaugeSum("sglang:realtime_tokens_total", map[string]string{"mode": "decode"}); ok {
+		pc, _ := pm.GetGaugeSum("sglang:realtime_tokens_total", map[string]string{"mode": "prefill_compute"})
+		pcache, _ := pm.GetGaugeSum("sglang:realtime_tokens_total", map[string]string{"mode": "prefill_cache"})
+		return pc + pcache, g, true, true
+	}
+	prompt, okP = pm.GetGaugeSum("sglang:prompt_tokens_total", nil)
+	gen, okG = pm.GetGaugeSum("sglang:generation_tokens_total", nil)
+	return prompt, gen, okP, okG
 }

@@ -63,12 +63,13 @@ func parseVLLMMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, pre
 	}
 
 	// Prefix cache hit rate (0.0-1.0 → convert to 0-100%)
-	// Newer vLLM exports counters (prefix_cache_hits_total / prefix_cache_queries_total) instead of a gauge
+	// Newer vLLM exports counters (prefix_cache_hits_total / prefix_cache_queries_total) instead of a gauge.
+	// Sum all series: like the token counters these can fan out per model_name (issue #15).
 	if v, _, ok := pm.GetGaugeAny("vllm:gpu_prefix_cache_hit_rate"); ok {
 		m.CacheHitRatePct = v * 100
 	} else {
-		hits, _, hOk := pm.GetGaugeAny("vllm:prefix_cache_hits_total")
-		queries, _, qOk := pm.GetGaugeAny("vllm:prefix_cache_queries_total")
+		hits, hOk := pm.GetGaugeSum("vllm:prefix_cache_hits_total", nil)
+		queries, qOk := pm.GetGaugeSum("vllm:prefix_cache_queries_total", nil)
 		if hOk && qOk && queries > 0 {
 			m.CacheHitRatePct = (hits / queries) * 100
 		}
@@ -80,36 +81,26 @@ func parseVLLMMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, pre
 		[]string{"vllm:time_per_output_token_seconds", "vllm:inter_token_latency_seconds"},
 	)
 
-	// Token throughput: compute rate from counters
-	// We use prev snapshot to compute delta/time
+	// Token throughput: counter-delta rates (issue #15).
+	// vllm:{prompt,generation}_tokens_total can fan out per model_name/engine,
+	// so deltas are taken over summed series, and dt comes from the previous
+	// counter snapshot's timestamp rather than prev.LastSeen (which lags one
+	// poll behind prevCounters, halving every rate).
+	now := time.Now()
+	prompt, okPrompt := pm.GetGaugeSum("vllm:prompt_tokens_total", nil)
+	gen, okGen := pm.GetGaugeSum("vllm:generation_tokens_total", nil)
+	preempt, okPreempt := pm.GetGaugeSum("vllm:num_preemptions_total", nil)
 	if prev != nil && prev.Online {
-		dt := time.Since(prev.LastSeen).Seconds()
-		if dt > 0 {
-			if v, _, ok := pm.GetGaugeAny("vllm:prompt_tokens_total"); ok {
-				m.PromptTokPerSec = (v - prevCounters.promptTokensTotal) / dt
-				if m.PromptTokPerSec < 0 {
-					m.PromptTokPerSec = 0
-				}
+		if dt, ok := prevCounters.rateWindow(now); ok {
+			if okPrompt {
+				m.PromptTokPerSec = max(0.0, (prompt-prevCounters.promptTokensTotal)/dt)
 			}
-			if v, _, ok := pm.GetGaugeAny("vllm:generation_tokens_total"); ok {
-				m.GenTokPerSec = (v - prevCounters.genTokensTotal) / dt
-				if m.GenTokPerSec < 0 {
-					m.GenTokPerSec = 0
-				}
+			if okGen {
+				m.GenTokPerSec = max(0.0, (gen-prevCounters.genTokensTotal)/dt)
 			}
-		}
-	}
-
-	// Preemptions (evictions) rate: compute from counter delta
-	if v, _, ok := pm.GetGaugeAny("vllm:num_preemptions_total"); ok {
-		if prev != nil && prev.Online {
-			dt := time.Since(prev.LastSeen).Seconds()
-			if dt > 0 {
-				rate := (v - prevCounters.preemptionsTotal) / dt
-				if rate < 0 {
-					rate = 0
-				}
-				m.EvictPerSec = rate
+			// Preemptions (evictions) rate from the same counter delta window.
+			if okPreempt {
+				m.EvictPerSec = max(0.0, (preempt-prevCounters.preemptionsTotal)/dt)
 			}
 		}
 	}
@@ -133,17 +124,18 @@ func parseVLLMMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, pre
 		}
 	}
 
-	// Store raw counters for next rate calculation
+	// Store summed raw counters (with sample timestamp) for next rate calculation
 	var counters counterState
-	if v, _, ok := pm.GetGaugeAny("vllm:prompt_tokens_total"); ok {
-		counters.promptTokensTotal = v
+	if okPrompt {
+		counters.promptTokensTotal = prompt
 	}
-	if v, _, ok := pm.GetGaugeAny("vllm:generation_tokens_total"); ok {
-		counters.genTokensTotal = v
+	if okGen {
+		counters.genTokensTotal = gen
 	}
-	if v, _, ok := pm.GetGaugeAny("vllm:num_preemptions_total"); ok {
-		counters.preemptionsTotal = v
+	if okPreempt {
+		counters.preemptionsTotal = preempt
 	}
+	counters.ts = now
 	if len(tagCounters) > 0 {
 		counters.tenantReqTotals = tagCounters
 	}

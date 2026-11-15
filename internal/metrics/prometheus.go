@@ -5,6 +5,7 @@ package metrics
 import (
 	"bufio"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -109,6 +110,23 @@ func (pm *ParsedMetrics) GetGauge(name string, labelFilter map[string]string) (f
 		}
 	}
 	return 0, false
+}
+
+// GetGaugeSum sums every sample matching name, optionally filtered by label
+// key=value pairs. Counters exported as multiple series (e.g. per is_streaming
+// or model_name label) must be summed before taking deltas: returning an
+// arbitrary single series yields frozen or wrong rates (issue #15).
+// Returns (sum, true) if at least one series matched, (0, false) otherwise.
+func (pm *ParsedMetrics) GetGaugeSum(name string, labelFilter map[string]string) (float64, bool) {
+	var sum float64
+	found := false
+	for _, s := range pm.Samples {
+		if s.Name == name && matchLabels(s.Labels, labelFilter) {
+			sum += s.Value
+			found = true
+		}
+	}
+	return sum, found
 }
 
 // GetGaugeAny returns the first matching gauge value.
@@ -316,9 +334,9 @@ func estimateQuantile(buckets []HistogramBucket, totalCount float64, quantile fl
 	}
 
 	// Return last finite upper bound
-	for i := len(sorted) - 1; i >= 0; i-- {
-		if !math.IsInf(sorted[i].UpperBound, 1) {
-			return sorted[i].UpperBound
+	for _, s := range slices.Backward(sorted) {
+		if !math.IsInf(s.UpperBound, 1) {
+			return s.UpperBound
 		}
 	}
 	return 0

@@ -88,6 +88,7 @@ func TestVLLMRateCalculation(t *testing.T) {
 	prevCounters := counterState{
 		promptTokensTotal: 10000,
 		genTokensTotal:    33000,
+		ts:                time.Now().Add(-2 * time.Second), // issue #15: dt source
 	}
 
 	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:8000", Online: true}

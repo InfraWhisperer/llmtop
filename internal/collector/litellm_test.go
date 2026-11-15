@@ -79,8 +79,9 @@ func TestLiteLLMRateCalculation(t *testing.T) {
 		LastSeen: time.Now().Add(-2 * time.Second),
 	}
 	prevCounters := counterState{
-		promptTokensTotal: 123000, // prev litellm_input_tokens_metric
-		genTokensTotal:    73000,  // prev litellm_output_tokens_metric
+		promptTokensTotal: 123000,                           // prev litellm_input_tokens_metric
+		genTokensTotal:    73000,                            // prev litellm_output_tokens_metric
+		ts:                time.Now().Add(-2 * time.Second), // issue #15: dt source
 	}
 
 	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:4000", Online: true}
