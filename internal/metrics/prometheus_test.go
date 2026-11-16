@@ -111,6 +111,74 @@ func TestParseText_Empty(t *testing.T) {
 	}
 }
 
+func TestGetGaugeSum(t *testing.T) {
+	text := "sglang:prompt_tokens_total{model_name=\"m\",is_streaming=\"false\"} 6000\n" +
+		"sglang:prompt_tokens_total{model_name=\"m\",is_streaming=\"true\"} 2500\n" +
+		"sglang:num_running_reqs{model_name=\"m\"} 8\n"
+	pm := ParseText(text)
+	// Multi-series counters must sum every matching series (issue #15).
+	if v, ok := pm.GetGaugeSum("sglang:prompt_tokens_total", nil); !ok || v != 8500 {
+		t.Errorf("GetGaugeSum(prompt_tokens_total) = %v, %v; want 8500, true", v, ok)
+	}
+	// Label filter restricts which series are summed.
+	if v, ok := pm.GetGaugeSum("sglang:prompt_tokens_total", map[string]string{"is_streaming": "true"}); !ok || v != 2500 {
+		t.Errorf("GetGaugeSum(filtered) = %v, %v; want 2500, true", v, ok)
+	}
+	// Missing metric reports found=false.
+	if _, ok := pm.GetGaugeSum("sglang:nope_total", nil); ok {
+		t.Error("GetGaugeSum(missing) reported found=true")
+	}
+}
+
+// GaugeSeries is what rate collectors read: one value per series, so a delta can
+// be clamped series by series instead of over the summed total (issue #15).
+func TestGaugeSeries(t *testing.T) {
+	text := "sglang:prompt_tokens_total{model_name=\"m\",is_streaming=\"false\"} 6000\n" +
+		"sglang:prompt_tokens_total{is_streaming=\"true\",model_name=\"m\"} 2500\n" +
+		"sglang:num_running_reqs{model_name=\"m\"} 8\n"
+	pm := ParseText(text)
+
+	values, sum, ok := pm.GaugeSeries("sglang:prompt_tokens_total", nil)
+	if !ok || sum != 8500 || len(values) != 2 {
+		t.Fatalf("GaugeSeries = (%v, %v, %v), want 2 series summing to 8500", values, sum, ok)
+	}
+	// Label order in the exposition must not change the key, or the next poll
+	// would see every series as new and report a 0 rate.
+	_, sameKeyCount := 0, 0
+	for key := range values {
+		if key != "is_streaming=false,model_name=m," && key != "is_streaming=true,model_name=m," {
+			t.Errorf("unexpected series key %q", key)
+		}
+		sameKeyCount++
+	}
+	if sameKeyCount != 2 {
+		t.Errorf("got %d series, want 2", sameKeyCount)
+	}
+
+	filtered, fsum, ok := pm.GaugeSeriesFiltered("sglang:prompt_tokens_total", map[string]string{"is_streaming": "true"})
+	if !ok || fsum != 2500 || len(filtered) != 1 {
+		t.Errorf("GaugeSeriesFiltered = (%v, %v, %v), want one series summing to 2500", filtered, fsum, ok)
+	}
+
+	if _, _, ok := pm.GaugeSeries("sglang:nope_total", nil); ok {
+		t.Error("GaugeSeries(missing) reported found=true")
+	}
+}
+
+// Filters select disjoint series of the same counter (SGLang picks realtime modes
+// apart); merging must keep every series and add the sums.
+func TestMergeGaugeSeries(t *testing.T) {
+	pm := ParseText("sglang:realtime_tokens_total{mode=\"prefill_compute\"} 600\n" +
+		"sglang:realtime_tokens_total{mode=\"prefill_cache\"} 100\n")
+	compute, computeSum, _ := pm.GaugeSeriesFiltered("sglang:realtime_tokens_total", map[string]string{"mode": "prefill_compute"})
+	cache, cacheSum, _ := pm.GaugeSeriesFiltered("sglang:realtime_tokens_total", map[string]string{"mode": "prefill_cache"})
+
+	merged, sum, ok := MergeGaugeSeries(compute, computeSum, cache, cacheSum)
+	if !ok || len(merged) != 2 || sum != 700 {
+		t.Errorf("MergeGaugeSeries = (%v, %v, %v), want 2 series summing to 700", merged, sum, ok)
+	}
+}
+
 func TestEstimateQuantile_Empty(t *testing.T) {
 	result := estimateQuantile(nil, 0, 0.99)
 	if result != 0 {

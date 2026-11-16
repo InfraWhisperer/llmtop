@@ -431,7 +431,7 @@ func renderWorkerRowInner(w *metrics.WorkerMetrics, selected bool, epW, modelW i
 	ttftPlain := formatTTFT(w.TTFT_P99, colTTFT)
 	itlPlain := formatTTFT(w.ITL_P99, colITL)
 	hitPlain := formatHitRate(w.CacheHitRatePct, colHit)
-	tokPlain := formatTokPerSec(w.GenTokPerSec+w.PromptTokPerSec, colTok)
+	tokPlain := formatTokPerSec(w.DisplayTokPerSec(), colTok)
 
 	if selected {
 		plain := "  " + dot + " " + gutter + " " + rolePlain + " " + epStr + " " + backendPlain + " " + modelStr + " " +
@@ -452,7 +452,7 @@ func renderWorkerRowInner(w *metrics.WorkerMetrics, selected bool, epW, modelW i
 		ttftStyle(w.TTFT_P99, ttftPlain) + " " +
 		ttftStyle(w.ITL_P99, itlPlain) + " " +
 		hitRateStyle(w.CacheHitRatePct, hitPlain) + " " +
-		tokPerSecStyle(w.GenTokPerSec+w.PromptTokPerSec, tokPlain)
+		tokPerSecStyle(w.DisplayTokPerSec(), tokPlain)
 }
 
 // --- Plain formatting functions (no ANSI, just padded strings) ---

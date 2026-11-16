@@ -1024,7 +1024,7 @@ func (m *Model) sortWorkers() {
 		case SortHitRate:
 			return a.CacheHitRatePct > b.CacheHitRatePct
 		case SortTokPerSec:
-			return (a.PromptTokPerSec + a.GenTokPerSec) > (b.PromptTokPerSec + b.GenTokPerSec)
+			return a.DisplayTokPerSec() > b.DisplayTokPerSec()
 		}
 		return false
 	})
@@ -1930,7 +1930,7 @@ func (m Model) renderDetail() string {
 	if w.KVCacheUsageNVMePct > 0 {
 		sb.WriteString(renderDetailRow("KV Cache NVMe", fmt.Sprintf("%.1f%%", w.KVCacheUsageNVMePct)))
 	}
-	sb.WriteString(renderDetailRow("Cache Hit Rate", fmt.Sprintf("%.1f%%", w.CacheHitRatePct)))
+	sb.WriteString(renderDetailRow("Cache Hit Rate", fmt.Sprintf("%.1f%%", w.CacheHitDisplayPct())))
 	if w.StoreSizeBytes > 0 {
 		sb.WriteString(renderDetailRow("Store Size", formatBytes(w.StoreSizeBytes)))
 	}
@@ -1954,7 +1954,12 @@ func (m Model) renderDetail() string {
 
 	// Throughput metrics
 	sb.WriteString(StyleDetailSection.Render("Throughput") + "\n")
-	sb.WriteString(renderDetailRow("Prompt Tokens/s", fmt.Sprintf("%.1f", w.PromptTokPerSec)))
+	sb.WriteString(renderDetailRow("Prompt Tokens/s", fmt.Sprintf("%.1f", w.PrefillComputeDisplayTokPerSec())))
+	if w.HasPrefillSplit() {
+		// Shown only for backends that report the split, so a vLLM worker never
+		// reads "cache 0.0" for a reuse rate it never sends (issue #15).
+		sb.WriteString(renderDetailRow("Prefill Cache Tokens/s", fmt.Sprintf("%.1f", w.PrefillCacheTokPerSec)))
+	}
 	sb.WriteString(renderDetailRow("Generation Tokens/s", fmt.Sprintf("%.1f", w.GenTokPerSec)))
 	sb.WriteString("\n")
 

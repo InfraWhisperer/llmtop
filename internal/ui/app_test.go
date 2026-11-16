@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/InfraWhisperer/llmtop/internal/collector"
 	"github.com/InfraWhisperer/llmtop/internal/metrics"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // stubDCGMCollector returns a *collector.DCGMCollector that won't hit the network.

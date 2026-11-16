@@ -108,10 +108,12 @@ func parseTritonMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, p
 		reqSuccess = v
 	}
 
-	// Compute throughput rates from counter deltas
+	// Compute throughput rates from counter deltas. dt comes from the
+	// previous counter snapshot, not prev.LastSeen, which lags one poll
+	// behind prevCounters and halves rates (issue #15).
+	now := time.Now()
 	if prev != nil && prev.Online {
-		dt := time.Since(prev.LastSeen).Seconds()
-		if dt > 0 {
+		if dt, ok := prevCounters.rateWindow(now); ok {
 			if inferCount > 0 {
 				rate := (inferCount - prevCounters.genTokensTotal) / dt
 				if rate > 0 {
@@ -163,6 +165,7 @@ func parseTritonMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, p
 	var counters counterState
 	counters.promptTokensTotal = reqSuccess
 	counters.genTokensTotal = inferCount
+	counters.ts = now
 
 	return counters
 }

@@ -83,12 +83,12 @@ func RenderDetailOverlay(w *metrics.WorkerMetrics, gpus []*metrics.GPUInfo, widt
 		))
 	}
 	sb.WriteString(overlayMetricLine(
-		"Tok/s", fmt.Sprintf("%.0f", w.PromptTokPerSec+w.GenTokPerSec),
+		"Tok/s", fmt.Sprintf("%.0f", w.DisplayTokPerSec()),
 		"Queue", fmt.Sprintf("%d", w.RequestsWaiting),
 		innerWidth,
 	))
 	sb.WriteString(overlayMetricLine(
-		"Hit rate", fmt.Sprintf("%.0f%%", w.CacheHitRatePct),
+		"Hit rate", fmt.Sprintf("%.0f%%", w.CacheHitDisplayPct()),
 		"Evict/s", fmt.Sprintf("%.0f", w.EvictPerSec),
 		innerWidth,
 	))
@@ -138,7 +138,7 @@ func RenderDetailOverlay(w *metrics.WorkerMetrics, gpus []*metrics.GPUInfo, widt
 	)
 }
 
-func overlayRow(label, value string, width int) string {
+func overlayRow(label, value string, _ int) string {
 	return "  " + StyleDetailLabel.Render(fmt.Sprintf("%-14s", label)) +
 		StyleDetailValue.Render(value) + "\n"
 }
@@ -207,7 +207,7 @@ func renderLatencyBlock(label string, ls metrics.LatencySnapshot, innerWidth int
 	return line + "\n" + spark + "\n"
 }
 
-func overlayMetricLine(label1, val1, label2, val2 string, width int) string {
+func overlayMetricLine(label1, val1, label2, val2 string, _ int) string {
 	col1 := StyleDetailLabel.Render(fmt.Sprintf("  %-12s", label1)) + StyleDetailValue.Render(fmt.Sprintf("%-8s", val1))
 	col2 := StyleDetailLabel.Render(fmt.Sprintf("%-12s", label2)) + StyleDetailValue.Render(val2)
 	return col1 + col2 + "\n"
