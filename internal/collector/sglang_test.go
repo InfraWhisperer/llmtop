@@ -254,6 +254,89 @@ func TestSGLangRate_FallbackHasNoCacheSplit(t *testing.T) {
 	}
 }
 
+// sglang:cache_hit_rate is an instantaneous gauge only set on iterations with
+// a new prefill batch, so it reads 0 during idle/decode-only windows while the
+// cumulative counters show ~89 % reuse (issue #15, hit-rate axis). With the
+// realtime counters present they must win over the gauge, with lifetime and
+// windowed values reported per the header/detail-row split.
+func TestSGLangCacheHit_CountersBeatGauge(t *testing.T) {
+	body := sampleSGLangMetricsRealtime + "# TYPE sglang:cache_hit_rate gauge\nsglang:cache_hit_rate{model_name=\"m\"} 0.0\n"
+	pm := metrics.ParseText(body)
+	prev := &metrics.WorkerMetrics{Online: true, LastSeen: time.Now().Add(-2 * time.Second)}
+	prevCounters := counterState{
+		promptTokensTotal:       600, // compute 550 + cache 50
+		prefillCacheTokensTotal: 50,
+		genTokensTotal:          2000,
+		ts:                      time.Now().Add(-2 * time.Second),
+	}
+	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:30000", Online: true}
+	parseSGLangMetrics(m, prev, prevCounters, pm)
+
+	// Lifetime: cache 100 / prompt 700 = 14.29 %.
+	if !approxEqual(m.CacheHitRatePct, 100.0/7.0, 0.01) {
+		t.Errorf("CacheHitRatePct = %f, want %f", m.CacheHitRatePct, 100.0/7.0)
+	}
+	// Window: Δcache 50 / Δprompt 100 = 50 %.
+	if !approxEqual(m.CacheHitWindowPct, 50, 0.01) {
+		t.Errorf("CacheHitWindowPct = %f, want 50", m.CacheHitWindowPct)
+	}
+}
+
+// Without a cache split (finished-request fallback) the gauge remains the only
+// source, and no windowed value may be invented from it.
+func TestSGLangCacheHit_GaugeFallbackNoSplit(t *testing.T) {
+	pm := metrics.ParseText(sampleSGLangMetrics)
+	prev := &metrics.WorkerMetrics{Online: true, LastSeen: time.Now().Add(-2 * time.Second)}
+	prevCounters := counterState{
+		promptTokensTotal: 8000,
+		genTokensTotal:    21000,
+		ts:                time.Now().Add(-2 * time.Second),
+	}
+	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:30000", Online: true}
+	parseSGLangMetrics(m, prev, prevCounters, pm)
+
+	if !approxEqual(m.CacheHitRatePct, 32, 0.01) {
+		t.Errorf("CacheHitRatePct = %f, want 32 (gauge fallback)", m.CacheHitRatePct)
+	}
+	if m.CacheHitWindowPct != 0 {
+		t.Errorf("CacheHitWindowPct = %f, want 0 (no split, no window)", m.CacheHitWindowPct)
+	}
+}
+
+// A window with no new prompt work (0/0 while idle) or a counter reset
+// (negative delta after a server restart) must leave the windowed value unset
+// rather than showing a fake 0 % or a negative rate.
+func TestSGLangCacheHit_IdleAndReset(t *testing.T) {
+	pm := metrics.ParseText(sampleSGLangMetricsRealtime)
+	online := &metrics.WorkerMetrics{Online: true}
+
+	idle := &metrics.WorkerMetrics{Endpoint: "http://x", Online: true}
+	parseSGLangMetrics(idle, online, counterState{
+		promptTokensTotal:       700, // identical to current sample → Δ0
+		prefillCacheTokensTotal: 100,
+		genTokensTotal:          3000,
+		ts:                      time.Now().Add(-2 * time.Second),
+	}, pm)
+	if idle.CacheHitWindowPct != 0 {
+		t.Errorf("idle CacheHitWindowPct = %f, want 0", idle.CacheHitWindowPct)
+	}
+
+	reset := &metrics.WorkerMetrics{Endpoint: "http://x", Online: true}
+	parseSGLangMetrics(reset, online, counterState{
+		promptTokensTotal:       70000, // server restarted → deltas negative
+		prefillCacheTokensTotal: 10000,
+		genTokensTotal:          3000,
+		ts:                      time.Now().Add(-2 * time.Second),
+	}, pm)
+	if reset.CacheHitWindowPct != 0 {
+		t.Errorf("reset CacheHitWindowPct = %f, want 0", reset.CacheHitWindowPct)
+	}
+	// Lifetime still reflects the fresh cumulative counters.
+	if !approxEqual(reset.CacheHitRatePct, 100.0/7.0, 0.01) {
+		t.Errorf("reset CacheHitRatePct = %f, want %f", reset.CacheHitRatePct, 100.0/7.0)
+	}
+}
+
 func TestDetectSGLang(t *testing.T) {
 	pm := metrics.ParseText(sampleSGLangMetrics)
 	p := &sglangParser{}

@@ -70,6 +70,12 @@ type WorkerMetrics struct {
 	KVCacheUsageCPUPct  float64 `json:"kv_cache_usage_cpu_pct"`  // 0-100 (CPU, may be absent)
 	KVCacheUsageNVMePct float64 `json:"kv_cache_usage_nvme_pct"` // 0-100 (NVMe, may be absent)
 	CacheHitRatePct     float64 `json:"cache_hit_rate_pct"`      // 0-100
+	// Windowed prefix-cache hit rate over the last sample window, derived
+	// from counter deltas (Δcached / Δprompt). 0 = no data; fall back to
+	// CacheHitRatePct. CacheHitRatePct is the lifetime-cumulative ratio when
+	// the backend exposes counters (matching vLLM hits_total/queries_total),
+	// so the header stays stable while this field feeds the detail row.
+	CacheHitWindowPct float64 `json:"cache_hit_window_pct"` // 0-100
 
 	// Latency (milliseconds) — legacy scalar fields kept for backward compatibility.
 	TTFT_P50 float64 `json:"ttft_p50"`

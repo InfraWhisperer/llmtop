@@ -94,8 +94,14 @@ func RenderDetailOverlay(w *metrics.WorkerMetrics, gpus []*metrics.GPUInfo, widt
 		"Pre cache t/s", fmt.Sprintf("%.0f", w.PrefillCacheTokPerSec),
 		innerWidth,
 	))
+	// Detail surface → windowed hit rate when the collector produced one
+	// (current activity), with the lifetime ratio as fallback (issue #15).
+	windowed := w.CacheHitWindowPct
+	if windowed <= 0 {
+		windowed = w.CacheHitRatePct
+	}
 	sb.WriteString(overlayMetricLine(
-		"Hit rate", fmt.Sprintf("%.0f%%", w.CacheHitRatePct),
+		"Hit rate", fmt.Sprintf("%.0f%%", windowed),
 		"Evict/s", fmt.Sprintf("%.0f", w.EvictPerSec),
 		innerWidth,
 	))
@@ -145,7 +151,7 @@ func RenderDetailOverlay(w *metrics.WorkerMetrics, gpus []*metrics.GPUInfo, widt
 	)
 }
 
-func overlayRow(label, value string, width int) string {
+func overlayRow(label, value string, _ int) string {
 	return "  " + StyleDetailLabel.Render(fmt.Sprintf("%-14s", label)) +
 		StyleDetailValue.Render(value) + "\n"
 }
@@ -214,7 +220,7 @@ func renderLatencyBlock(label string, ls metrics.LatencySnapshot, innerWidth int
 	return line + "\n" + spark + "\n"
 }
 
-func overlayMetricLine(label1, val1, label2, val2 string, width int) string {
+func overlayMetricLine(label1, val1, label2, val2 string, _ int) string {
 	col1 := StyleDetailLabel.Render(fmt.Sprintf("  %-12s", label1)) + StyleDetailValue.Render(fmt.Sprintf("%-8s", val1))
 	col2 := StyleDetailLabel.Render(fmt.Sprintf("%-12s", label2)) + StyleDetailValue.Render(val2)
 	return col1 + col2 + "\n"

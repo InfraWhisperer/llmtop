@@ -1930,7 +1930,7 @@ func (m Model) renderDetail() string {
 	if w.KVCacheUsageNVMePct > 0 {
 		sb.WriteString(renderDetailRow("KV Cache NVMe", fmt.Sprintf("%.1f%%", w.KVCacheUsageNVMePct)))
 	}
-	sb.WriteString(renderDetailRow("Cache Hit Rate", fmt.Sprintf("%.1f%%", w.CacheHitRatePct)))
+	sb.WriteString(renderDetailRow("Cache Hit Rate", formatCacheHitDetail(w)))
 	if w.StoreSizeBytes > 0 {
 		sb.WriteString(renderDetailRow("Store Size", formatBytes(w.StoreSizeBytes)))
 	}
@@ -2025,6 +2025,18 @@ func renderThroughputDetailRows(w *metrics.WorkerMetrics) string {
 	sb.WriteString(renderDetailRow("Prompt Tokens/s", fmt.Sprintf("%.1f", w.PromptTokPerSec)))
 	sb.WriteString(renderDetailRow("Generation Tokens/s", fmt.Sprintf("%.1f", w.GenTokPerSec)))
 	return sb.String()
+}
+
+// formatCacheHitDetail renders the worker's cache hit rate for the detail
+// row: the last-window delta when the collector produced one (current but
+// bursty), otherwise the lifetime-cumulative ratio the header shows. The
+// SGLang instantaneous gauge reads 0 whenever no new prefill batch landed
+// (same trap as issue #15 on the tok/s axis), so counter-derived values win.
+func formatCacheHitDetail(w *metrics.WorkerMetrics) string {
+	if w.CacheHitWindowPct > 0 {
+		return fmt.Sprintf("%.1f%% (window) · %.1f%% (lifetime)", w.CacheHitWindowPct, w.CacheHitRatePct)
+	}
+	return fmt.Sprintf("%.1f%%", w.CacheHitRatePct)
 }
 
 func renderDetailRow(label, value string) string {
