@@ -48,8 +48,6 @@ func parseSGLangMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, p
 		m.KVCacheUsagePct = v * 100
 	}
 
-
-
 	// TTFT/ITL: populate scalar fields and LatencySnapshots in one pass.
 	populateLatency(m, pm,
 		"sglang:time_to_first_token_seconds",
