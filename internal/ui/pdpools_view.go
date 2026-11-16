@@ -138,7 +138,9 @@ func renderPrefillCard(w *metrics.WorkerMetrics, cardWidth int) string {
 
 	// Prefill side, split by whether tokens were computed or reused from the
 	// prefix cache — the cache number is accounting, not compute (issue #15).
-	lines = append(lines, cardRow("Pre compute t/s", formatThroughput(w.PrefillComputeTokPerSec), innerWidth))
+	// Backends without a split computed their whole prompt side, so the compute
+	// row falls back to it; formatThroughput(0) renders "-" for the cache row.
+	lines = append(lines, cardRow("Pre compute t/s", formatThroughput(w.PrefillComputeDisplayTokPerSec()), innerWidth))
 	lines = append(lines, cardRow("Pre cache t/s", formatThroughput(w.PrefillCacheTokPerSec), innerWidth))
 
 	content := strings.Join(lines, "\n")

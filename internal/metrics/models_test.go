@@ -49,6 +49,38 @@ func TestComputeFleetSummary(t *testing.T) {
 	}
 }
 
+// Issue #15 follow-up (P1): the split fields are only populated by backends that
+// report one. Everywhere else the whole prompt side was computed, so the display
+// accessor must fall back to it instead of rendering a 0 that reads as "prefill
+// is stuck".
+func TestPrefillDisplayFallback(t *testing.T) {
+	split := &WorkerMetrics{
+		PromptTokPerSec:         60,
+		PrefillComputeTokPerSec: 40,
+		PrefillCacheTokPerSec:   20,
+	}
+	if !split.HasPrefillSplit() {
+		t.Error("HasPrefillSplit = false, want true when the backend reports a split")
+	}
+	if got := split.PrefillComputeDisplayTokPerSec(); got != 40 {
+		t.Errorf("PrefillComputeDisplayTokPerSec = %f, want 40 (compute half only)", got)
+	}
+
+	// vLLM / NIM / TGI / Triton / LiteLLM / llama.cpp: no split, prompt is compute.
+	noSplit := &WorkerMetrics{PromptTokPerSec: 800, GenTokPerSec: 150}
+	if noSplit.HasPrefillSplit() {
+		t.Error("HasPrefillSplit = true, want false when no split fields are set")
+	}
+	if got := noSplit.PrefillComputeDisplayTokPerSec(); got != 800 {
+		t.Errorf("PrefillComputeDisplayTokPerSec = %f, want 800 (whole prompt side)", got)
+	}
+
+	idle := &WorkerMetrics{}
+	if got := idle.PrefillComputeDisplayTokPerSec(); got != 0 {
+		t.Errorf("PrefillComputeDisplayTokPerSec = %f, want 0 for an idle worker", got)
+	}
+}
+
 // Issue #15: the prompt side must not be folded into a single fleet number.
 // A backend that reports a prefix-cache split (SGLang realtime_tokens_total)
 // contributes its cache rate separately; one that does not (vLLM here) has its

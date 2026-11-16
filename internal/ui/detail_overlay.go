@@ -88,10 +88,17 @@ func RenderDetailOverlay(w *metrics.WorkerMetrics, gpus []*metrics.GPUInfo, widt
 		innerWidth,
 	))
 	// Prefill side kept apart from generation: cache-side tokens are reused from
-	// the prefix/radix cache, not computed (issue #15).
+	// the prefix/radix cache, not computed (issue #15). Backends without a split
+	// (vLLM, NIM, TGI, …) computed their whole prompt side, so they show it as
+	// compute and an em dash for the absent cache half — never a 0 that reads as
+	// "prefill is stuck".
+	preCacheStr := fmt.Sprintf("%.0f", w.PrefillCacheTokPerSec)
+	if !w.HasPrefillSplit() {
+		preCacheStr = "\u2014"
+	}
 	sb.WriteString(overlayMetricLine(
-		"Pre t/s", fmt.Sprintf("%.0f", w.PrefillComputeTokPerSec),
-		"Pre cache t/s", fmt.Sprintf("%.0f", w.PrefillCacheTokPerSec),
+		"Pre t/s", fmt.Sprintf("%.0f", w.PrefillComputeDisplayTokPerSec()),
+		"Pre cache t/s", preCacheStr,
 		innerWidth,
 	))
 	// Detail surface → windowed hit rate when the collector produced one

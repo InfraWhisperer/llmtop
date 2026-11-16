@@ -121,6 +121,27 @@ type WorkerMetrics struct {
 	GenTokHistory []float64 `json:"-"`
 }
 
+// HasPrefillSplit reports whether this backend reports its prompt side split
+// into computed and cache-reused halves. Only SGLang's realtime counters do; for
+// vLLM, NIM, TGI, Triton, LiteLLM and llama.cpp the split fields stay zero
+// because every prompt token in the window really was computed.
+func (w *WorkerMetrics) HasPrefillSplit() bool {
+	return w.PrefillCacheTokPerSec > 0 || w.PrefillComputeTokPerSec > 0
+}
+
+// PrefillComputeDisplayTokPerSec is the prefill rate every per-worker surface
+// must render: the compute half when the backend reports a split, otherwise the
+// whole prompt side. Reading PrefillComputeTokPerSec directly reported vLLM (and
+// every other unsplit backend) as "prefill 0" while it computed at 800 tok/s —
+// the same complaint issue #15 fixed for SGLang, still open in the detail
+// overlay, the P/D pools card and the worker detail pane.
+func (w *WorkerMetrics) PrefillComputeDisplayTokPerSec() float64 {
+	if w.HasPrefillSplit() {
+		return w.PrefillComputeTokPerSec
+	}
+	return w.PromptTokPerSec
+}
+
 // FleetSummary aggregates metrics across all workers.
 type FleetSummary struct {
 	TotalWorkers   int     `json:"total_workers"`
@@ -164,11 +185,9 @@ func ComputeFleetSummary(workers []*WorkerMetrics) FleetSummary {
 			s.GenTokPerSec += w.GenTokPerSec
 			// Backends without a cache split report the whole prompt side as
 			// compute, so the header's prefill segment stays meaningful.
-			if w.PrefillCacheTokPerSec > 0 || w.PrefillComputeTokPerSec > 0 {
-				s.PrefillComputeTokPerSec += w.PrefillComputeTokPerSec
+			s.PrefillComputeTokPerSec += w.PrefillComputeDisplayTokPerSec()
+			if w.HasPrefillSplit() {
 				s.PrefillCacheTokPerSec += w.PrefillCacheTokPerSec
-			} else {
-				s.PrefillComputeTokPerSec += w.PromptTokPerSec
 			}
 			if w.CacheHitRatePct > 0 {
 				cacheHitSum += w.CacheHitRatePct
