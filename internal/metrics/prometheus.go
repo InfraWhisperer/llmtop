@@ -129,6 +129,79 @@ func (pm *ParsedMetrics) GetGaugeSum(name string, labelFilter map[string]string)
 	return sum, found
 }
 
+// GaugeSeries returns every series of a metric as a map from a canonical
+// rendering of the sample's label set to its value, plus the sum over those
+// series and whether any series matched. A nil keep accepts every series of the
+// metric; otherwise keep(labels) selects them.
+//
+// Rate collectors take their deltas through this rather than GetGaugeSum: with
+// the summed form, one restarted series (a vLLM engine whose counter resets to
+// 0 while its siblings keep counting) can cancel the growth of all the others
+// and collapse the whole rate window to zero (issue #15 follow-up).
+func (pm *ParsedMetrics) GaugeSeries(name string, keep func(labels map[string]string) bool) (map[string]float64, float64, bool) {
+	values := map[string]float64{}
+	var sum float64
+	found := false
+	for _, s := range pm.Samples {
+		if s.Name != name || (keep != nil && !keep(s.Labels)) {
+			continue
+		}
+		values[seriesKey(s.Labels)] += s.Value
+		sum += s.Value
+		found = true
+	}
+	return values, sum, found
+}
+
+// GaugeSeriesFiltered is GaugeSeries with an equality label filter, mirroring
+// the labelFilter argument of GetGauge/GetGaugeSum.
+func (pm *ParsedMetrics) GaugeSeriesFiltered(name string, labelFilter map[string]string) (map[string]float64, float64, bool) {
+	if len(labelFilter) == 0 {
+		return pm.GaugeSeries(name, nil)
+	}
+	return pm.GaugeSeries(name, func(labels map[string]string) bool {
+		return matchLabels(labels, labelFilter)
+	})
+}
+
+// MergeGaugeSeries combines per-series reads of the same counter taken with
+// different label filters (e.g. SGLang realtime_tokens_total selected by mode).
+// Series keys are derived from the full label set, so sets from disjoint filters
+// never collide; the sums add up.
+func MergeGaugeSeries(a map[string]float64, aSum float64, b map[string]float64, bSum float64) (map[string]float64, float64, bool) {
+	if a == nil {
+		a = map[string]float64{}
+	}
+	found := len(a) > 0
+	for k, v := range b {
+		a[k] += v
+		found = true
+	}
+	return a, aSum + bSum, found
+}
+
+// seriesKey renders a label set as a stable map key: sorted `k=v,` pairs. Two
+// polls of the same series therefore key identically regardless of the order the
+// exposition happened to print its labels in.
+func seriesKey(labels map[string]string) string {
+	if len(labels) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(labels))
+	for k := range labels {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var sb strings.Builder
+	for _, k := range keys {
+		sb.WriteString(k)
+		sb.WriteByte('=')
+		sb.WriteString(labels[k])
+		sb.WriteByte(',')
+	}
+	return sb.String()
+}
+
 // GetGaugeAny returns the first matching gauge value.
 func (pm *ParsedMetrics) GetGaugeAny(name string) (float64, map[string]string, bool) {
 	for _, s := range pm.Samples {

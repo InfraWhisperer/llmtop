@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -110,14 +111,40 @@ sglang:prompt_tokens_total{model_name="m",is_streaming="false"} 500
 sglang:generation_tokens_total{model_name="m",is_streaming="false"} 2000
 `
 
+// sglangStreamText is a previous-poll exposition for the finished-request
+// counters, so rate tests carry a real per-series baseline (the collector keys
+// its snapshots by label set).
+func sglangStreamText(promptFalse, promptTrue, genFalse, genTrue float64) string {
+	return fmt.Sprintf(`sglang:prompt_tokens_total{model_name="Qwen/Qwen2.5-72B-Instruct",is_streaming="false"} %v
+sglang:prompt_tokens_total{model_name="Qwen/Qwen2.5-72B-Instruct",is_streaming="true"} %v
+sglang:generation_tokens_total{model_name="Qwen/Qwen2.5-72B-Instruct",is_streaming="false"} %v
+sglang:generation_tokens_total{model_name="Qwen/Qwen2.5-72B-Instruct",is_streaming="true"} %v
+`, promptFalse, promptTrue, genFalse, genTrue)
+}
+
+// sglangRealtimeText is the same for the realtime counters, whose label sets also
+// carry the mode that splits prompt work into compute and cache.
+func sglangRealtimeText(compute, cache, decode float64) string {
+	return fmt.Sprintf(`sglang:realtime_tokens_total{model_name="m",mode="prefill_compute"} %v
+sglang:realtime_tokens_total{model_name="m",mode="prefill_cache"} %v
+sglang:realtime_tokens_total{model_name="m",mode="decode"} %v
+`, compute, cache, decode)
+}
+
+// sglangMonoText is a previous-poll exposition for backends that export the
+// finished-request counters as one series per model (no is_streaming label), so
+// the series keys line up with sampleSGLangMetrics.
+func sglangMonoText(prompt, gen float64) string {
+	return fmt.Sprintf(`sglang:prompt_tokens_total{model_name="Qwen/Qwen2.5-72B-Instruct"} %v
+sglang:generation_tokens_total{model_name="Qwen/Qwen2.5-72B-Instruct"} %v
+`, prompt, gen)
+}
+
 func TestSGLangRate_MultiSeriesSum(t *testing.T) {
 	pm := metrics.ParseText(sampleSGLangMetricsMultiSeries)
 	prev := &metrics.WorkerMetrics{Online: true, LastSeen: time.Now().Add(-2 * time.Second)}
-	prevCounters := counterState{
-		promptTokensTotal: 7500,  // summed prev
-		genTokensTotal:    20000, // summed prev
-		ts:                time.Now().Add(-2 * time.Second),
-	}
+	prevCounters := prevSnapshot(t, parseSGLangMetrics,
+		sglangStreamText(5000, 2500, 13000, 7000), 2*time.Second) // Σ7500 / Σ20000
 	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:30000", Online: true}
 	parseSGLangMetrics(m, prev, prevCounters, pm)
 	// summed prompt = 6000+2500 = 8500, delta 1000 over ~2s = ~500 tok/s
@@ -133,11 +160,7 @@ func TestSGLangRate_MultiSeriesSum(t *testing.T) {
 func TestSGLangRate_PrefersRealtimeTokens(t *testing.T) {
 	pm := metrics.ParseText(sampleSGLangMetricsRealtime)
 	prev := &metrics.WorkerMetrics{Online: true, LastSeen: time.Now().Add(-2 * time.Second)}
-	prevCounters := counterState{
-		promptTokensTotal: 500,
-		genTokensTotal:    2000,
-		ts:                time.Now().Add(-2 * time.Second),
-	}
+	prevCounters := prevSnapshot(t, parseSGLangMetrics, sglangRealtimeText(400, 100, 2000), 2*time.Second)
 	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:30000", Online: true}
 	parseSGLangMetrics(m, prev, prevCounters, pm)
 	// realtime prompt = prefill_compute(600)+prefill_cache(100) = 700, delta 200/2s = 100
@@ -153,11 +176,8 @@ func TestSGLangRate_PrefersRealtimeTokens(t *testing.T) {
 func TestSGLangRate_FallsBackWhenNoRealtime(t *testing.T) {
 	pm := metrics.ParseText(sampleSGLangMetricsMultiSeries)
 	prev := &metrics.WorkerMetrics{Online: true, LastSeen: time.Now().Add(-2 * time.Second)}
-	prevCounters := counterState{
-		promptTokensTotal: 8000,
-		genTokensTotal:    21000,
-		ts:                time.Now().Add(-2 * time.Second),
-	}
+	prevCounters := prevSnapshot(t, parseSGLangMetrics,
+		sglangStreamText(5500, 2500, 14000, 7000), 2*time.Second) // Σ8000 / Σ21000
 	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:30000", Online: true}
 	parseSGLangMetrics(m, prev, prevCounters, pm)
 	// fallback summed prompt 8500-8000=500/2s=250; gen 22000-21000=1000/2s=500
@@ -178,11 +198,8 @@ func TestSGLangRate_UsesCounterTimestamp(t *testing.T) {
 		Online:   true,
 		LastSeen: time.Now().Add(-4 * time.Second), // stale: one extra poll behind
 	}
-	prevCounters := counterState{
-		promptTokensTotal: 7500,
-		genTokensTotal:    20000,
-		ts:                time.Now().Add(-2 * time.Second), // actual counter age
-	}
+	// Actual counter age is 2s, not the stale LastSeen.
+	prevCounters := prevSnapshot(t, parseSGLangMetrics, sglangMonoText(7500, 20000), 2*time.Second)
 	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:30000", Online: true}
 	parseSGLangMetrics(m, prev, prevCounters, pm)
 	// delta 1000/2000 over 2s (ts), not 4s (LastSeen): ~500 / ~1000 tok/s.
@@ -201,12 +218,7 @@ func TestSGLangRate_UsesCounterTimestamp(t *testing.T) {
 func TestSGLangRate_PrefillCacheSplit(t *testing.T) {
 	pm := metrics.ParseText(sampleSGLangMetricsRealtime)
 	prev := &metrics.WorkerMetrics{Online: true, LastSeen: time.Now().Add(-2 * time.Second)}
-	prevCounters := counterState{
-		promptTokensTotal:       600, // compute 550 + cache 50
-		prefillCacheTokensTotal: 50,
-		genTokensTotal:          2000,
-		ts:                      time.Now().Add(-2 * time.Second),
-	}
+	prevCounters := prevSnapshot(t, parseSGLangMetrics, sglangRealtimeText(550, 50, 2000), 2*time.Second)
 	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:30000", Online: true}
 	parseSGLangMetrics(m, prev, prevCounters, pm)
 
@@ -238,11 +250,7 @@ func TestSGLangRate_PrefillCacheSplit(t *testing.T) {
 func TestSGLangRate_FallbackHasNoCacheSplit(t *testing.T) {
 	pm := metrics.ParseText(sampleSGLangMetricsMultiSeries)
 	prev := &metrics.WorkerMetrics{Online: true, LastSeen: time.Now().Add(-2 * time.Second)}
-	prevCounters := counterState{
-		promptTokensTotal: 8000,
-		genTokensTotal:    21000,
-		ts:                time.Now().Add(-2 * time.Second),
-	}
+	prevCounters := prevSnapshot(t, parseSGLangMetrics, sglangStreamText(5500, 2500, 14000, 7000), 2*time.Second)
 	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:30000", Online: true}
 	parseSGLangMetrics(m, prev, prevCounters, pm)
 
@@ -263,12 +271,7 @@ func TestSGLangCacheHit_CountersBeatGauge(t *testing.T) {
 	body := sampleSGLangMetricsRealtime + "# TYPE sglang:cache_hit_rate gauge\nsglang:cache_hit_rate{model_name=\"m\"} 0.0\n"
 	pm := metrics.ParseText(body)
 	prev := &metrics.WorkerMetrics{Online: true, LastSeen: time.Now().Add(-2 * time.Second)}
-	prevCounters := counterState{
-		promptTokensTotal:       600, // compute 550 + cache 50
-		prefillCacheTokensTotal: 50,
-		genTokensTotal:          2000,
-		ts:                      time.Now().Add(-2 * time.Second),
-	}
+	prevCounters := prevSnapshot(t, parseSGLangMetrics, sglangRealtimeText(550, 50, 2000), 2*time.Second)
 	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:30000", Online: true}
 	parseSGLangMetrics(m, prev, prevCounters, pm)
 
@@ -287,11 +290,7 @@ func TestSGLangCacheHit_CountersBeatGauge(t *testing.T) {
 func TestSGLangCacheHit_GaugeFallbackNoSplit(t *testing.T) {
 	pm := metrics.ParseText(sampleSGLangMetrics)
 	prev := &metrics.WorkerMetrics{Online: true, LastSeen: time.Now().Add(-2 * time.Second)}
-	prevCounters := counterState{
-		promptTokensTotal: 8000,
-		genTokensTotal:    21000,
-		ts:                time.Now().Add(-2 * time.Second),
-	}
+	prevCounters := prevSnapshot(t, parseSGLangMetrics, sglangStreamText(5500, 2500, 14000, 7000), 2*time.Second)
 	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:30000", Online: true}
 	parseSGLangMetrics(m, prev, prevCounters, pm)
 
@@ -311,23 +310,15 @@ func TestSGLangCacheHit_IdleAndReset(t *testing.T) {
 	online := &metrics.WorkerMetrics{Online: true}
 
 	idle := &metrics.WorkerMetrics{Endpoint: "http://x", Online: true}
-	parseSGLangMetrics(idle, online, counterState{
-		promptTokensTotal:       700, // identical to current sample → Δ0
-		prefillCacheTokensTotal: 100,
-		genTokensTotal:          3000,
-		ts:                      time.Now().Add(-2 * time.Second),
-	}, pm)
+	parseSGLangMetrics(idle, online,
+		prevSnapshot(t, parseSGLangMetrics, sglangRealtimeText(600, 100, 3000), 2*time.Second), pm)
 	if idle.CacheHitWindowPct != 0 {
 		t.Errorf("idle CacheHitWindowPct = %f, want 0", idle.CacheHitWindowPct)
 	}
 
 	reset := &metrics.WorkerMetrics{Endpoint: "http://x", Online: true}
-	parseSGLangMetrics(reset, online, counterState{
-		promptTokensTotal:       70000, // server restarted → deltas negative
-		prefillCacheTokensTotal: 10000,
-		genTokensTotal:          3000,
-		ts:                      time.Now().Add(-2 * time.Second),
-	}, pm)
+	parseSGLangMetrics(reset, online,
+		prevSnapshot(t, parseSGLangMetrics, sglangRealtimeText(70000, 10000, 30000), 2*time.Second), pm)
 	if reset.CacheHitWindowPct != 0 {
 		t.Errorf("reset CacheHitWindowPct = %f, want 0", reset.CacheHitWindowPct)
 	}
@@ -385,12 +376,8 @@ func TestSGLangRateCalculation(t *testing.T) {
 		Online:   true,
 		LastSeen: time.Now().Add(-2 * time.Second),
 	}
-	prevCounters := counterState{
-		promptTokensTotal: 7500,
-		genTokensTotal:    20000,
-		// As of issue #15, dt comes from prevCounters.ts; LastSeen is stale by design.
-		ts: time.Now().Add(-2 * time.Second),
-	}
+	// As of issue #15, dt comes from prevCounters.ts; LastSeen is stale by design.
+	prevCounters := prevSnapshot(t, parseSGLangMetrics, sglangMonoText(7500, 20000), 2*time.Second)
 
 	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:30000", Online: true}
 	parseSGLangMetrics(m, prev, prevCounters, pm)

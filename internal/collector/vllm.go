@@ -62,18 +62,9 @@ func parseVLLMMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, pre
 		m.KVCacheUsageNVMePct = v * 100
 	}
 
-	// Prefix cache hit rate (0.0-1.0 → convert to 0-100%)
-	// Newer vLLM exports counters (prefix_cache_hits_total / prefix_cache_queries_total) instead of a gauge.
-	// Sum all series: like the token counters these can fan out per model_name (issue #15).
-	if v, _, ok := pm.GetGaugeAny("vllm:gpu_prefix_cache_hit_rate"); ok {
-		m.CacheHitRatePct = v * 100
-	} else {
-		hits, hOk := pm.GetGaugeSum("vllm:prefix_cache_hits_total", nil)
-		queries, qOk := pm.GetGaugeSum("vllm:prefix_cache_queries_total", nil)
-		if hOk && qOk && queries > 0 {
-			m.CacheHitRatePct = (hits / queries) * 100
-		}
-	}
+	// Prefix cache hit rate is derived from the cumulative counters in the
+	// throughput block below, where the same counter window feeds the windowed
+	// detail-row value.
 
 	// TTFT and ITL: legacy scalar fields plus the new LatencySnapshot view.
 	populateLatency(m, pm,
@@ -81,26 +72,56 @@ func parseVLLMMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, pre
 		[]string{"vllm:time_per_output_token_seconds", "vllm:inter_token_latency_seconds"},
 	)
 
-	// Token throughput: counter-delta rates (issue #15).
-	// vllm:{prompt,generation}_tokens_total can fan out per model_name/engine,
-	// so deltas are taken over summed series, and dt comes from the previous
-	// counter snapshot's timestamp rather than prev.LastSeen (which lags one
-	// poll behind prevCounters, halving every rate).
+	// Token throughput and prefix-cache hit rate, both read as per-series
+	// counter snapshots (issue #15).
+	//
+	// vllm:{prompt,generation}_tokens_total and the prefix-cache counters fan out
+	// per model_name (and per engine in V1), so deltas are taken series by series
+	// with each clamped at 0 — a restarted engine must not cancel its siblings'
+	// growth and flatten the whole window (see seriesDelta). dt comes from the
+	// previous counter snapshot's timestamp, not prev.LastSeen, which lags one
+	// poll behind prevCounters and halved every rate.
+	//
+	// The hit rate prefers the cumulative hits/queries counters over the
+	// instantaneous vllm:gpu_prefix_cache_hit_rate gauge: that gauge is only set on
+	// iterations carrying a new prefill batch, so it reads 0 at idle and during
+	// pure decode even while the prefix cache serves most prompt tokens — the same
+	// instantaneous-source trap as issue #15 cause 5, previously hidden under the
+	// header's KV% label. The gauge stays as the fallback for builds that export
+	// neither counter.
 	now := time.Now()
-	prompt, okPrompt := pm.GetGaugeSum("vllm:prompt_tokens_total", nil)
-	gen, okGen := pm.GetGaugeSum("vllm:generation_tokens_total", nil)
-	preempt, okPreempt := pm.GetGaugeSum("vllm:num_preemptions_total", nil)
-	if prev != nil && prev.Online {
-		if dt, ok := prevCounters.rateWindow(now); ok {
-			if okPrompt {
-				m.PromptTokPerSec = max(0.0, (prompt-prevCounters.promptTokensTotal)/dt)
-			}
-			if okGen {
-				m.GenTokPerSec = max(0.0, (gen-prevCounters.genTokensTotal)/dt)
-			}
-			// Preemptions (evictions) rate from the same counter delta window.
-			if okPreempt {
-				m.EvictPerSec = max(0.0, (preempt-prevCounters.preemptionsTotal)/dt)
+	hits, hitsTotal, okHits := pm.GaugeSeries("vllm:prefix_cache_hits_total", nil)
+	queries, queriesTotal, okQueries := pm.GaugeSeries("vllm:prefix_cache_queries_total", nil)
+	prompt, promptTotal, okPrompt := pm.GaugeSeries("vllm:prompt_tokens_total", nil)
+	gen, genTotal, okGen := pm.GaugeSeries("vllm:generation_tokens_total", nil)
+	preempt, preemptTotal, okPreempt := pm.GaugeSeries("vllm:num_preemptions_total", nil)
+
+	if okHits && okQueries && queriesTotal > 0 {
+		m.CacheHitRatePct = clampPct(hitsTotal / queriesTotal * 100)
+	} else if v, _, ok := pm.GetGaugeAny("vllm:gpu_prefix_cache_hit_rate"); ok {
+		m.CacheHitRatePct = v * 100
+	}
+
+	dt, windowOK := prevCounters.rateWindow(now)
+	haveWindow := windowOK && prev != nil && prev.Online
+	if haveWindow {
+		if okPrompt {
+			m.PromptTokPerSec = seriesRate(prevCounters.promptSeries, prompt, prevCounters.promptTokensTotal, promptTotal, dt)
+		}
+		if okGen {
+			m.GenTokPerSec = seriesRate(prevCounters.genSeries, gen, prevCounters.genTokensTotal, genTotal, dt)
+		}
+		// Preemptions (evictions) rate from the same counter delta window.
+		if okPreempt {
+			m.EvictPerSec = seriesRate(prevCounters.preemptSeries, preempt, prevCounters.preemptionsTotal, preemptTotal, dt)
+		}
+		// Windowed hit rate for the detail row: Δhits/Δqueries over this poll,
+		// left unset (rather than 0 %) when no query landed in the window.
+		if okHits && okQueries {
+			dQueries := seriesDelta(prevCounters.prefixQueriesSeries, queries, 0, queriesTotal)
+			dHits := seriesDelta(prevCounters.prefixHitsSeries, hits, 0, hitsTotal)
+			if dQueries > 0 && dHits <= dQueries {
+				m.CacheHitWindowPct = clampPct(dHits / dQueries * 100)
 			}
 		}
 	}
@@ -124,16 +145,23 @@ func parseVLLMMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, pre
 		}
 	}
 
-	// Store summed raw counters (with sample timestamp) for next rate calculation
+	// Store per-series counters, their totals (for single-series readers), and
+	// the sample timestamp for the next poll's rate window.
 	var counters counterState
 	if okPrompt {
-		counters.promptTokensTotal = prompt
+		counters.promptSeries, counters.promptTokensTotal = prompt, promptTotal
 	}
 	if okGen {
-		counters.genTokensTotal = gen
+		counters.genSeries, counters.genTokensTotal = gen, genTotal
 	}
 	if okPreempt {
-		counters.preemptionsTotal = preempt
+		counters.preemptSeries, counters.preemptionsTotal = preempt, preemptTotal
+	}
+	if okHits {
+		counters.prefixHitsSeries = hits
+	}
+	if okQueries {
+		counters.prefixQueriesSeries = queries
 	}
 	counters.ts = now
 	if len(tagCounters) > 0 {

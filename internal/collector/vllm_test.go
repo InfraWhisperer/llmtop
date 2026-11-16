@@ -85,11 +85,10 @@ func TestVLLMRateCalculation(t *testing.T) {
 		Online:   true,
 		LastSeen: time.Now().Add(-2 * time.Second),
 	}
-	prevCounters := counterState{
-		promptTokensTotal: 10000,
-		genTokensTotal:    33000,
-		ts:                time.Now().Add(-2 * time.Second), // issue #15: dt source
-	}
+	// issue #15: dt comes from the counter snapshot's own timestamp.
+	prevCounters := prevSnapshot(t, parseVLLMMetrics, `vllm:prompt_tokens_total{model_name="meta-llama/Llama-3.1-8B-Instruct"} 10000
+vllm:generation_tokens_total{model_name="meta-llama/Llama-3.1-8B-Instruct"} 33000
+`, 2*time.Second)
 
 	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:8000", Online: true}
 	parseVLLMMetrics(m, prev, prevCounters, pm)

@@ -78,11 +78,9 @@ func TestLiteLLMRateCalculation(t *testing.T) {
 		Online:   true,
 		LastSeen: time.Now().Add(-2 * time.Second),
 	}
-	prevCounters := counterState{
-		promptTokensTotal: 123000,                           // prev litellm_input_tokens_metric
-		genTokensTotal:    73000,                            // prev litellm_output_tokens_metric
-		ts:                time.Now().Add(-2 * time.Second), // issue #15: dt source
-	}
+	prevCounters := prevSnapshot(t, parseLiteLLMMetrics, `litellm_input_tokens_metric{model="gpt-4",team="engineering"} 123000
+litellm_output_tokens_metric{model="gpt-4",team="engineering"} 73000
+`, 2*time.Second) // issue #15: dt comes from the snapshot timestamp
 
 	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:4000", Online: true}
 	parseLiteLLMMetrics(m, prev, prevCounters, pm)
