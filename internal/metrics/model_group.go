@@ -4,17 +4,26 @@ import "sort"
 
 // ModelGroup aggregates worker stats for a single model.
 type ModelGroup struct {
-	ModelName      string          `json:"model_name"`
-	Backend        Backend         `json:"backend"`
-	Workers        int             `json:"workers"`
-	OnlineWorkers  int             `json:"online_workers"`
-	TotalTokPerSec float64         `json:"total_tok_per_sec"`
-	AvgKVCachePct  float64         `json:"avg_kv_cache_pct"`
-	TotalQueue     int             `json:"total_queue"`
-	TotalRunning   int             `json:"total_running"`
-	AvgTTFTP99     float64         `json:"avg_ttft_p99"`
-	AvgHitRate     float64         `json:"avg_hit_rate"`
-	TopTenants     []TenantMetrics `json:"top_tenants,omitempty"`
+	ModelName      string  `json:"model_name"`
+	Backend        Backend `json:"backend"`
+	Workers        int     `json:"workers"`
+	OnlineWorkers  int     `json:"online_workers"`
+	TotalTokPerSec float64 `json:"total_tok_per_sec"`
+	// PrefillTokPerSec / GenTokPerSec split TotalTokPerSec across the two sides
+	// that actually compute, so the model view can tell a prefill-bound fleet
+	// from a decode-bound one. Prefill counts the computed half only — reusing
+	// prompt tokens from prefix cache is not throughput the fleet earned, and
+	// folding it in is what produced the 25k tok/s spikes of issue #15. For a
+	// backend with no split the whole prompt side was computed, so
+	// PrefillTokPerSec + GenTokPerSec == TotalTokPerSec always holds.
+	PrefillTokPerSec float64         `json:"prefill_tok_per_sec"`
+	GenTokPerSec     float64         `json:"gen_tok_per_sec"`
+	AvgKVCachePct    float64         `json:"avg_kv_cache_pct"`
+	TotalQueue       int             `json:"total_queue"`
+	TotalRunning     int             `json:"total_running"`
+	AvgTTFTP99       float64         `json:"avg_ttft_p99"`
+	AvgHitRate       float64         `json:"avg_hit_rate"`
+	TopTenants       []TenantMetrics `json:"top_tenants,omitempty"`
 }
 
 // maxTopTenants is the cap on TenantMetrics entries kept per ModelGroup.
@@ -43,8 +52,11 @@ func GroupWorkersByModel(workers []*WorkerMetrics) []ModelGroup {
 		g.total++
 		if w.Online {
 			g.online++
-			workerTok := w.DisplayTokPerSec()
+			prefillTok := w.PrefillComputeDisplayTokPerSec()
+			workerTok := prefillTok + w.GenTokPerSec
 			g.tokPerSec += workerTok
+			g.prefillTok += prefillTok
+			g.genTok += w.GenTokPerSec
 			g.kvSum += w.KVCacheUsagePct
 			g.queue += w.RequestsWaiting
 			g.running += w.RequestsRunning
@@ -71,13 +83,15 @@ func GroupWorkersByModel(workers []*WorkerMetrics) []ModelGroup {
 	result := make([]ModelGroup, 0, len(groups))
 	for _, g := range groups {
 		mg := ModelGroup{
-			ModelName:      g.name,
-			Backend:        g.backend,
-			Workers:        g.total,
-			OnlineWorkers:  g.online,
-			TotalTokPerSec: g.tokPerSec,
-			TotalQueue:     g.queue,
-			TotalRunning:   g.running,
+			ModelName:        g.name,
+			Backend:          g.backend,
+			Workers:          g.total,
+			OnlineWorkers:    g.online,
+			TotalTokPerSec:   g.tokPerSec,
+			PrefillTokPerSec: g.prefillTok,
+			GenTokPerSec:     g.genTok,
+			TotalQueue:       g.queue,
+			TotalRunning:     g.running,
 		}
 		if g.onlineCount > 0 {
 			mg.AvgKVCachePct = g.kvSum / float64(g.onlineCount)
@@ -135,6 +149,8 @@ type modelAccum struct {
 	online      int
 	onlineCount int
 	tokPerSec   float64
+	prefillTok  float64
+	genTok      float64
 	kvSum       float64
 	queue       int
 	running     int

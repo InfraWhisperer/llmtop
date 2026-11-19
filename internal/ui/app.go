@@ -1930,7 +1930,7 @@ func (m Model) renderDetail() string {
 	if w.KVCacheUsageNVMePct > 0 {
 		sb.WriteString(renderDetailRow("KV Cache NVMe", fmt.Sprintf("%.1f%%", w.KVCacheUsageNVMePct)))
 	}
-	sb.WriteString(renderDetailRow("Cache Hit Rate", fmt.Sprintf("%.1f%%", w.CacheHitDisplayPct())))
+	sb.WriteString(renderDetailRow("Cache Hit Rate", formatCacheHitDetail(w)))
 	if w.StoreSizeBytes > 0 {
 		sb.WriteString(renderDetailRow("Store Size", formatBytes(w.StoreSizeBytes)))
 	}
@@ -1954,13 +1954,7 @@ func (m Model) renderDetail() string {
 
 	// Throughput metrics
 	sb.WriteString(StyleDetailSection.Render("Throughput") + "\n")
-	sb.WriteString(renderDetailRow("Prompt Tokens/s", fmt.Sprintf("%.1f", w.PrefillComputeDisplayTokPerSec())))
-	if w.HasPrefillSplit() {
-		// Shown only for backends that report the split, so a vLLM worker never
-		// reads "cache 0.0" for a reuse rate it never sends (issue #15).
-		sb.WriteString(renderDetailRow("Prefill Cache Tokens/s", fmt.Sprintf("%.1f", w.PrefillCacheTokPerSec)))
-	}
-	sb.WriteString(renderDetailRow("Generation Tokens/s", fmt.Sprintf("%.1f", w.GenTokPerSec)))
+	sb.WriteString(renderThroughputDetailRows(w))
 	sb.WriteString("\n")
 
 	// TTFT sparkline history
@@ -2016,6 +2010,41 @@ func (m Model) renderHelp() string {
 			StyleHelpOverlay.Render(sb.String()),
 		),
 	)
+}
+
+// renderThroughputDetailRows renders the prefill/generation breakdown for the
+// detail pane. Prefill compute and prefill cache are separate rows: cache-side
+// tokens were reused from the prefix/radix cache rather than computed, so
+// folding them into a prompt rate is what produced the 25k+ tok/s spikes of
+// issue #15.
+//
+// There is deliberately no total-prompt row: for a backend without a split it
+// would repeat the compute row verbatim, and for one with a split it would be
+// the sum that #15 is about. renderDetailRow pads labels to 22 columns, so every
+// label here stays within that width.
+func renderThroughputDetailRows(w *metrics.WorkerMetrics) string {
+	var sb strings.Builder
+	sb.WriteString(renderDetailRow("Prefill Compute t/s", fmt.Sprintf("%.1f", w.PrefillComputeDisplayTokPerSec())))
+	if w.HasPrefillSplit() {
+		sb.WriteString(renderDetailRow("Prefill Cache t/s", fmt.Sprintf("%.1f", w.PrefillCacheTokPerSec)))
+	}
+	sb.WriteString(renderDetailRow("Generation t/s", fmt.Sprintf("%.1f", w.GenTokPerSec)))
+	return sb.String()
+}
+
+// formatCacheHitDetail renders the worker's cache hit rate: the last-window
+// delta when the collector produced one (current, but bursty), with the
+// lifetime-cumulative ratio beside it. The SGLang instantaneous gauge reads 0
+// whenever no new prefill batch landed — the same trap as #15 on the hit-rate
+// axis — so the counter-derived value is the one shown first.
+func formatCacheHitDetail(w *metrics.WorkerMetrics) string {
+	if w.CacheHitWindowPct > 0 {
+		return fmt.Sprintf("%.1f%% (window) · %.1f%% (lifetime)", w.CacheHitWindowPct, w.CacheHitRatePct)
+	}
+	if w.CacheHitRatePct == 0 && !w.ReportsCacheHit() {
+		return "\u2014"
+	}
+	return fmt.Sprintf("%.1f%%", w.CacheHitRatePct)
 }
 
 func renderDetailRow(label, value string) string {

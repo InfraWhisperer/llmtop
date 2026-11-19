@@ -174,17 +174,49 @@ func (w *WorkerMetrics) CacheHitDisplayPct() float64 {
 	return w.CacheHitRatePct
 }
 
+// ReportsCacheHit says whether this worker's backend exposes a cache-hit signal
+// at all, over either window. A zero from a backend that reports the metric is a
+// real 0% reuse rate; a zero from one that never reported it is missing data,
+// and the two must not render the same way — a 0% pill tells the operator the
+// cache is useless when in fact nothing was measured.
+func (w *WorkerMetrics) ReportsCacheHit() bool {
+	return w.CacheHitRatePct > 0 || w.CacheHitWindowPct > 0
+}
+
 // FleetSummary aggregates metrics across all workers.
 type FleetSummary struct {
 	TotalWorkers   int     `json:"total_workers"`
 	OnlineWorkers  int     `json:"online_workers"`
 	TotalReqPerSec float64 `json:"total_req_per_sec"`
 	AvgCacheHit    float64 `json:"avg_cache_hit"`
-	AvgKVPercGPU   float64 `json:"avg_kv_perc_gpu"` // cluster-wide average GPU KV cache usage (0-100)
-	P99TTFT        float64 `json:"p99_ttft"`
-	TotalTokPerSec float64 `json:"total_tok_per_sec"`
-	PrefillCount   int     `json:"prefill_count"`
-	DecodeCount    int     `json:"decode_count"`
+	// CacheHitWorkers is how many online workers reported a cache-hit signal at
+	// all (windowed or lifetime). A fleet where nothing reports it must render
+	// "—", not a 0% pill: "0%" claims the cache never hits, which is a different
+	// statement from "this backend has no cache-hit metric".
+	CacheHitWorkers int     `json:"cache_hit_workers"`
+	AvgKVPercGPU    float64 `json:"avg_kv_perc_gpu"` // cluster-wide average GPU KV cache usage (0-100)
+	P99TTFT         float64 `json:"p99_ttft"`
+	TotalTokPerSec  float64 `json:"total_tok_per_sec"`
+	// Segment rates over online workers, so a surface can show the two sides of
+	// the pipeline separately instead of one blended number.
+	//
+	// Invariant: TotalTokPerSec == GenTokPerSec + PrefillComputeTokPerSec.
+	//
+	// PrefillCacheTokPerSec sits outside that sum on purpose: those tokens were
+	// reused from the prefix/radix cache rather than computed, which is what
+	// inflated displayed throughput in issue #15. It is accounting, not earned
+	// throughput, so surfaces render it as its own labeled segment and never
+	// add it back onto the total.
+	GenTokPerSec            float64 `json:"gen_tok_per_sec"`
+	PrefillComputeTokPerSec float64 `json:"prefill_compute_tok_per_sec"`
+	PrefillCacheTokPerSec   float64 `json:"prefill_cache_tok_per_sec"`
+	// SplitWorkers counts online workers whose backend reports the prefill
+	// compute/cache split (currently only SGLang's realtime counters). A cache
+	// segment may be rendered only when this is > 0 — for every other backend
+	// "cache 0 tok/s" describes a metric that was never sent.
+	SplitWorkers int `json:"split_workers"`
+	PrefillCount int `json:"prefill_count"`
+	DecodeCount  int `json:"decode_count"`
 }
 
 // ComputeFleetSummary computes aggregate stats from a slice of worker metrics.
@@ -207,8 +239,14 @@ func ComputeFleetSummary(workers []*WorkerMetrics) FleetSummary {
 		if w.Online {
 			s.OnlineWorkers++
 			s.TotalTokPerSec += w.DisplayTokPerSec()
-			if w.CacheHitRatePct > 0 {
-				cacheHitSum += w.CacheHitRatePct
+			s.GenTokPerSec += w.GenTokPerSec
+			s.PrefillComputeTokPerSec += w.PrefillComputeDisplayTokPerSec()
+			if w.HasPrefillSplit() {
+				s.SplitWorkers++
+				s.PrefillCacheTokPerSec += w.PrefillCacheTokPerSec
+			}
+			if hit := w.CacheHitDisplayPct(); hit > 0 {
+				cacheHitSum += hit
 				cacheCount++
 			}
 			if w.KVCacheUsagePct > 0 {
@@ -223,6 +261,7 @@ func ComputeFleetSummary(workers []*WorkerMetrics) FleetSummary {
 	if cacheCount > 0 {
 		s.AvgCacheHit = cacheHitSum / float64(cacheCount)
 	}
+	s.CacheHitWorkers = cacheCount
 	if kvGPUCount > 0 {
 		s.AvgKVPercGPU = kvGPUSum / float64(kvGPUCount)
 	}

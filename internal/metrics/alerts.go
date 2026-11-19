@@ -375,12 +375,17 @@ func evalRule(rule AlertRule, state *AlertState, t AlertThresholds) []*Alert {
 				if !w.Online {
 					continue
 				}
-				tok := w.PromptTokPerSec + w.GenTokPerSec
+				// Each side is charged for the work that side owes: a prefill
+				// worker for the prompt tokens it must compute, a decode worker
+				// for the tokens it generates. PromptTokPerSec counts prompt
+				// tokens served from the prefix cache as if they were computed,
+				// which inflated the prefill side of this ratio and made the rule
+				// recommend decode workers that are not needed (issue #15).
 				switch w.Role {
 				case "prefill":
-					prefillTok += tok
+					prefillTok += w.PrefillComputeDisplayTokPerSec()
 				case "decode":
-					decodeTok += tok
+					decodeTok += w.GenTokPerSec
 				}
 			}
 			if decodeTok > 0 {

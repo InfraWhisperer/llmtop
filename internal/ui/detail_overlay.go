@@ -83,12 +83,34 @@ func RenderDetailOverlay(w *metrics.WorkerMetrics, gpus []*metrics.GPUInfo, widt
 		))
 	}
 	sb.WriteString(overlayMetricLine(
-		"Tok/s", fmt.Sprintf("%.0f", w.DisplayTokPerSec()),
+		"Gen t/s", fmt.Sprintf("%.0f", w.GenTokPerSec),
 		"Queue", fmt.Sprintf("%d", w.RequestsWaiting),
 		innerWidth,
 	))
+	// Prefill side kept apart from generation: cache-side tokens were reused from
+	// the prefix/radix cache, not computed (issue #15). A backend without a split
+	// computed its whole prompt side, so it renders that as compute and an em dash
+	// for the cache half it never reports — never a 0 that reads as “prefill is
+	// stuck”.
+	preCacheStr := "\u2014"
+	if w.HasPrefillSplit() {
+		preCacheStr = fmt.Sprintf("%.0f", w.PrefillCacheTokPerSec)
+	}
 	sb.WriteString(overlayMetricLine(
-		"Hit rate", fmt.Sprintf("%.0f%%", w.CacheHitDisplayPct()),
+		"Pre t/s", fmt.Sprintf("%.0f", w.PrefillComputeDisplayTokPerSec()),
+		"PreCache t/s", preCacheStr,
+		innerWidth,
+	))
+	// Detail surface → windowed hit rate when the collector produced one (current
+	// activity), lifetime ratio as fallback. A worker whose backend reports no
+	// cache-hit metric at all shows an em dash instead of a 0% that reads as a
+	// useless cache.
+	hitStr := "\u2014"
+	if w.ReportsCacheHit() {
+		hitStr = fmt.Sprintf("%.0f%%", w.CacheHitDisplayPct())
+	}
+	sb.WriteString(overlayMetricLine(
+		"Hit rate", hitStr,
 		"Evict/s", fmt.Sprintf("%.0f", w.EvictPerSec),
 		innerWidth,
 	))

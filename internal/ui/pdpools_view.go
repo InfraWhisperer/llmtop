@@ -136,8 +136,12 @@ func renderPrefillCard(w *metrics.WorkerMetrics, cardWidth int) string {
 	}
 	lines = append(lines, cardRow("KV xfer lat", xferStr, innerWidth))
 
-	tokTotal := w.DisplayTokPerSec()
-	lines = append(lines, cardRow("Tok/s out", formatThroughput(tokTotal), innerWidth))
+	// Prefill side, split by whether the tokens were computed or reused from the
+	// prefix cache — the cache number is accounting, not compute (issue #15). A
+	// backend without a split computed its whole prompt side, so the compute row
+	// falls back to that; formatThroughput(0) renders "-" for the cache row.
+	lines = append(lines, cardRow("Pre compute t/s", formatThroughput(w.PrefillComputeDisplayTokPerSec()), innerWidth))
+	lines = append(lines, cardRow("Pre cache t/s", formatThroughput(w.PrefillCacheTokPerSec), innerWidth))
 
 	content := strings.Join(lines, "\n")
 
@@ -279,12 +283,17 @@ func computeIdealRatio(prefill, decode []*metrics.WorkerMetrics) string {
 		return "-"
 	}
 
+	// Each side is measured by the work that side owes: a prefill worker is sized
+	// by the prompt tokens it must compute (reused prefix-cache tokens cost it
+	// nothing, and counting them is what produced the 125:N nonsense of #15), a
+	// decode worker by the tokens it generates. Summing the same blended display
+	// rate on both sides hid that these are different quantities.
 	var sumPrefillTok, sumDecodeTok float64
 	for _, w := range prefill {
-		sumPrefillTok += w.DisplayTokPerSec()
+		sumPrefillTok += w.PrefillComputeDisplayTokPerSec()
 	}
 	for _, w := range decode {
-		sumDecodeTok += w.DisplayTokPerSec()
+		sumDecodeTok += w.GenTokPerSec
 	}
 
 	if sumDecodeTok == 0 {
