@@ -178,12 +178,9 @@ func TestParseVLLM_KVTransferP99_PrefillOnly(t *testing.T) {
 func TestParseVLLM_TenantReqs(t *testing.T) {
 	pm := metrics.ParseText(sampleVLLMNVMeAndXfer)
 	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:8000", Online: true, Role: "prefill"}
-	counters := parseVLLMMetrics(m, nil, counterState{}, pm)
+	parseVLLMMetrics(m, nil, counterState{}, pm)
 	if m.TenantReqs["team-search"] != 200 || m.TenantReqs["team-rag"] != 100 {
 		t.Errorf("unexpected TenantReqs: %v", m.TenantReqs)
-	}
-	if counters.tenantReqTotals["team-search"] != 200 {
-		t.Errorf("expected tenant counter snapshot, got %v", counters.tenantReqTotals)
 	}
 }
 

@@ -11,11 +11,9 @@ import "time"
 // All three rate-computing backends (vLLM, SGLang, NIM) use the same
 // two counters: prompt_tokens_total and generation_tokens_total.
 //
-// tenantReqTotals retains the previous-poll vllm:request_success_total
-// counter per request_tag value. It is consumed by the model_group
-// aggregation layer (which currently relies on raw counters, not rates),
-// but kept here so future rate computation has a stable place to live
-// without churning unrelated parsers.
+// Per-tenant request counts are not mirrored here: the tenant view reads the
+// raw vllm:request_success_total values straight off WorkerMetrics.TenantReqs
+// each poll, so a previous-poll snapshot would be write-only state.
 type counterState struct {
 	promptTokensTotal float64
 	genTokensTotal    float64
@@ -23,7 +21,6 @@ type counterState struct {
 	// prefix-cache burst never contaminates the prefill-compute rate (issue #15).
 	prefillCacheTokensTotal float64
 	preemptionsTotal        float64
-	tenantReqTotals         map[string]float64
 	// Per-series previous values for the multi-series counters, keyed by
 	// metrics' canonical label-set key (see seriesDelta). Backends whose
 	// counters fan out over labels (vLLM per model_name/engine, SGLang per

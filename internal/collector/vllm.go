@@ -126,9 +126,10 @@ func parseVLLMMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, pre
 		}
 	}
 
-	// Per-tenant request counter snapshot. Always populate the raw counters
-	// from this poll; the rate is implied by the next poll's delta against
-	// counters.tenantReqTotals. The map stays at zero on first poll.
+	// Per-tenant request counts. The tenant view renders these raw counter
+	// values straight from this poll, so no previous-poll snapshot is kept
+	// here — a rate over request_success_total would need one, and nothing
+	// computes that rate today.
 	tagCounters := pm.GetAllGaugesByLabel("vllm:request_success_total", "request_tag")
 	if len(tagCounters) > 0 {
 		m.TenantReqs = make(map[string]float64, len(tagCounters))
@@ -164,9 +165,6 @@ func parseVLLMMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, pre
 		counters.prefixQueriesSeries = queries
 	}
 	counters.ts = now
-	if len(tagCounters) > 0 {
-		counters.tenantReqTotals = tagCounters
-	}
 
 	// Dynamo runtime augmentation: Dynamo pods emit dynamo_component_* metrics
 	// alongside vllm:* metrics. Use them as fallbacks when the vllm: gauge is
