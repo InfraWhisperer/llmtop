@@ -85,10 +85,10 @@ func TestVLLMRateCalculation(t *testing.T) {
 		Online:   true,
 		LastSeen: time.Now().Add(-2 * time.Second),
 	}
-	prevCounters := counterState{
-		promptTokensTotal: 10000,
-		genTokensTotal:    33000,
-	}
+	// issue #15: dt comes from the counter snapshot's own timestamp.
+	prevCounters := prevSnapshot(t, parseVLLMMetrics, `vllm:prompt_tokens_total{model_name="meta-llama/Llama-3.1-8B-Instruct"} 10000
+vllm:generation_tokens_total{model_name="meta-llama/Llama-3.1-8B-Instruct"} 33000
+`, 2*time.Second)
 
 	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:8000", Online: true}
 	parseVLLMMetrics(m, prev, prevCounters, pm)
@@ -178,12 +178,9 @@ func TestParseVLLM_KVTransferP99_PrefillOnly(t *testing.T) {
 func TestParseVLLM_TenantReqs(t *testing.T) {
 	pm := metrics.ParseText(sampleVLLMNVMeAndXfer)
 	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:8000", Online: true, Role: "prefill"}
-	counters := parseVLLMMetrics(m, nil, counterState{}, pm)
+	parseVLLMMetrics(m, nil, counterState{}, pm)
 	if m.TenantReqs["team-search"] != 200 || m.TenantReqs["team-rag"] != 100 {
 		t.Errorf("unexpected TenantReqs: %v", m.TenantReqs)
-	}
-	if counters.tenantReqTotals["team-search"] != 200 {
-		t.Errorf("expected tenant counter snapshot, got %v", counters.tenantReqTotals)
 	}
 }
 

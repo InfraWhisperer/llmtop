@@ -9,26 +9,28 @@ import (
 
 // Model-grouped view column widths (fixed columns).
 const (
-	colMGBackend  = 8
-	colMGWorkers  = 12
-	colMGTok      = 8
-	colMGAvgKV    = 8
-	colMGQueue    = 7
-	colMGRunning  = 8
-	colMGAvgTTFT  = 10
-	colMGAvgHit   = 8
+	colMGBackend = 8
+	colMGWorkers = 12
+	colMGTok     = 8
+	colMGPre     = 7
+	colMGGen     = 7
+	colMGAvgKV   = 8
+	colMGQueue   = 7
+	colMGRunning = 8
+	colMGAvgTTFT = 10
+	colMGAvgHit  = 8
 )
 
 // mgFixedWidth is the sum of all fixed model-group columns plus inter-column spaces and left margin.
-// Columns: BACKEND(8) WORKERS(12) TOK/S(8) AVG KV%(8) QUEUE(7) RUNNING(8) AVG TTFT(10) AVG HIT%(8)
-// Spaces between 8 cols = 7, plus 2-char left margin = 9 total overhead.
-var mgFixedWidth = colMGBackend + colMGWorkers + colMGTok + colMGAvgKV + colMGQueue + colMGRunning + colMGAvgTTFT + colMGAvgHit + 9
+// Columns: BACKEND(8) WORKERS(12) TOK/S(8) PRE/S(7) GEN/S(7) AVG KV%(8) QUEUE(7) RUNNING(8) AVG TTFT(10) AVG HIT%(8)
+// Spaces between 10 cols = 9, plus 2-char left margin = 11 total overhead.
+var mgFixedWidth = colMGBackend + colMGWorkers + colMGTok + colMGPre + colMGGen + colMGAvgKV + colMGQueue + colMGRunning + colMGAvgTTFT + colMGAvgHit + 11
 
 // ModelSortColumn represents a column that can be sorted in the model-grouped view.
 type ModelSortColumn int
 
 const (
-	ModelSortNone     ModelSortColumn = iota
+	ModelSortNone ModelSortColumn = iota
 	ModelSortName
 	ModelSortTokPerSec
 	ModelSortAvgKV
@@ -135,6 +137,8 @@ func renderModelTableHeader(sortCol ModelSortColumn, modelW int) string {
 		{"BACKEND", colMGBackend, ModelSortNone},
 		{"WORKERS", colMGWorkers, ModelSortNone},
 		{"TOK/S", colMGTok, ModelSortTokPerSec},
+		{"PRE/S", colMGPre, ModelSortNone},
+		{"GEN/S", colMGGen, ModelSortNone},
 		{"AVG KV%", colMGAvgKV, ModelSortAvgKV},
 		{"QUEUE", colMGQueue, ModelSortQueue},
 		{"RUNNING", colMGRunning, ModelSortRunning},
@@ -159,6 +163,11 @@ func renderModelGroupRow(g metrics.ModelGroup, selected bool, modelW int) string
 	backendPlain := padRight(string(g.Backend), colMGBackend)
 	workersStr := padRight(fmt.Sprintf("%d/%d", g.OnlineWorkers, g.Workers), colMGWorkers)
 	tokPlain := formatTokPerSec(g.TotalTokPerSec, colMGTok)
+	// Split halves of the same display rate: prefill is computed-only, so a
+	// SGLang group serving most of its prompt from prefix cache shows its real
+	// compute here rather than the inflated TOK/S total (issue #15).
+	prePlain := formatTokPerSec(g.PrefillTokPerSec, colMGPre)
+	genPlain := formatTokPerSec(g.GenTokPerSec, colMGGen)
 	kvPlain := formatKVCache(g.AvgKVCachePct, colMGAvgKV)
 	queuePlain := formatQueue(g.TotalQueue, colMGQueue)
 	runningStr := padRight(fmt.Sprintf("%d", g.TotalRunning), colMGRunning)
@@ -167,7 +176,7 @@ func renderModelGroupRow(g metrics.ModelGroup, selected bool, modelW int) string
 
 	if selected {
 		plain := "  " + modelStr + " " + backendPlain + " " +
-			workersStr + " " + tokPlain + " " + kvPlain + " " +
+			workersStr + " " + tokPlain + " " + prePlain + " " + genPlain + " " + kvPlain + " " +
 			queuePlain + " " + runningStr + " " + ttftPlain + " " +
 			hitPlain
 		return StyleTableRowSelected.Render(plain)
@@ -177,6 +186,8 @@ func renderModelGroupRow(g metrics.ModelGroup, selected bool, modelW int) string
 		backendStyle(g.Backend).Render(backendPlain) + " " +
 		workersStr + " " +
 		tokPerSecStyle(g.TotalTokPerSec, tokPlain) + " " +
+		tokPerSecStyle(g.PrefillTokPerSec, prePlain) + " " +
+		tokPerSecStyle(g.GenTokPerSec, genPlain) + " " +
 		kvCacheStyle(g.AvgKVCachePct, kvPlain) + " " +
 		queueStyle(g.TotalQueue, queuePlain) + " " +
 		runningStr + " " +

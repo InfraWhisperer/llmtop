@@ -61,23 +61,19 @@ func parseTGIMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, prev
 	// Token throughput: tgi_request_generated_tokens is a histogram whose _sum
 	// tracks total generated tokens. We compute rate from the counter.
 	// The _count tracks total requests, _sum tracks total tokens.
+	now := time.Now()
 	if prev != nil && prev.Online {
-		dt := time.Since(prev.LastSeen).Seconds()
-		if dt > 0 {
+		// dt comes from the previous counter snapshot, not prev.LastSeen,
+		// which lags one poll behind prevCounters and halves rates (issue #15).
+		if dt, ok := prevCounters.rateWindow(now); ok {
 			// Generated tokens rate from histogram _sum (appears as a sample
 			// named tgi_request_generated_tokens_sum in our parser)
 			if v, ok := pm.GetHistogramSumAny("tgi_request_generated_tokens"); ok {
-				m.GenTokPerSec = (v - prevCounters.genTokensTotal) / dt
-				if m.GenTokPerSec < 0 {
-					m.GenTokPerSec = 0
-				}
+				m.GenTokPerSec = max(0.0, (v-prevCounters.genTokensTotal)/dt)
 			}
 			// Input tokens rate
 			if v, ok := pm.GetHistogramSumAny("tgi_request_input_length"); ok {
-				m.PromptTokPerSec = (v - prevCounters.promptTokensTotal) / dt
-				if m.PromptTokPerSec < 0 {
-					m.PromptTokPerSec = 0
-				}
+				m.PromptTokPerSec = max(0.0, (v-prevCounters.promptTokensTotal)/dt)
 			}
 		}
 	}
@@ -90,6 +86,7 @@ func parseTGIMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, prev
 	if v, ok := pm.GetHistogramSumAny("tgi_request_generated_tokens"); ok {
 		counters.genTokensTotal = v
 	}
+	counters.ts = now
 
 	return counters
 }

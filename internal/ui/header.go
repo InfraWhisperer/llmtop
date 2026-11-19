@@ -38,9 +38,10 @@ func RenderHeader(summary metrics.FleetSummary, version string, intervalSec int,
 			summary.TotalWorkers, summary.OnlineWorkers),
 	)
 
-	tokPerSec := StyleHeaderValue.Render(fmt.Sprintf("%.0f tok/s", summary.TotalTokPerSec))
-
-	cacheHit := renderCacheHitPill(summary.AvgKVPercGPU)
+	// The pill is a cache-HIT rate, so it reads the fleet's hit rate, not KV
+	// occupancy — the two were conflated here and rendered a full cache as a
+	// healthy reuse rate.
+	cacheHit := renderCacheHitPill(summary.AvgCacheHit, summary.CacheHitWorkers > 0)
 	cacheLabel := StyleHeaderStat.Render("cache hit")
 
 	ttft := StyleHeaderValue.Render(fmt.Sprintf("%.0fms", summary.P99TTFT))
@@ -52,31 +53,103 @@ func RenderHeader(summary metrics.FleetSummary, version string, intervalSec int,
 
 	dot := StyleHeaderDot.Render(" · ")
 
-	parts := []string{title}
+	// head = everything before the throughput segment, tail = everything after.
+	// Both are measured first, so the throughput segment degrades to whatever
+	// actually fits instead of overflowing the bar.
+	head := []string{title}
 	if travelOffset > 0 {
 		// V1 scrub indicator: "T-Xs (paused)" or "+/-Xs" if anchor is set.
-		parts = append(parts, dot, renderScrubIndicator(travelOffset, travelAnchor, intervalSec))
+		head = append(head, dot, renderScrubIndicator(travelOffset, travelAnchor, intervalSec))
 	}
-	parts = append(parts,
-		dot, workers,
-		dot, tokPerSec,
-		dot, cacheLabel+StyleHeaderStat.Render(" ")+cacheHit,
-		dot, ttftLabel+StyleHeaderStat.Render(" ")+ttft,
-	)
+	head = append(head, dot, workers)
+
+	tail := []string{
+		dot, cacheLabel + StyleHeaderStat.Render(" ") + cacheHit,
+		dot, ttftLabel + StyleHeaderStat.Render(" ") + ttft,
+	}
 
 	// Only show pool health pill when P/D roles are detected
 	if summary.PrefillCount > 0 || summary.DecodeCount > 0 {
-		parts = append(parts, dot, poolHealth)
+		tail = append(tail, dot, poolHealth)
 	}
 
-	parts = append(parts, dot, interval)
+	tail = append(tail, dot, interval)
 
-	var header strings.Builder
-	for _, p := range parts {
-		header.WriteString(p)
+	used := lipgloss.Width(strings.Join(head, "")) +
+		lipgloss.Width(strings.Join(tail, "")) +
+		lipgloss.Width(dot)
+	throughput := renderThroughputSegments(summary, width-used)
+
+	return renderHeaderBar(strings.Join(head, "")+dot+throughput+strings.Join(tail, ""), width)
+}
+
+// renderThroughputSegments renders fleet throughput as separately labeled
+// rates rather than one blended number: "gen" is decode throughput, "prefill" is
+// prompt tokens that were actually computed, and "cached" is prompt tokens
+// served from the prefix/radix cache. They are never summed: SGLang reports
+// cache-side tokens in multi-thousand bursts per scrape interval, which rendered
+// as a bogus 25k-53k tok/s next to a real ~150 tok/s generation rate (issue #15).
+//
+// The cached segment appears only when some online worker reports the split
+// (FleetSummary.SplitWorkers). For a backend that never sends the split, a
+// "cached 0 tok/s" segment would describe a metric that does not exist, and a
+// worker genuinely running at 0% reuse would flicker between 0 and — .
+//
+// budget is the usable cell width in the bar; the segment degrades to the
+// richest tier that fits: all rates, then gen+prefill, then gen alone. When
+// budget is spent on cache the cache half is dropped, NOT folded back into the
+// prompt side — re-inflating "prefill" with reused tokens is the very bug #15 is
+// about, and a narrower bar may not lie in order to stay wide.
+func renderThroughputSegments(s metrics.FleetSummary, budget int) string {
+	tiers := [][]segment{
+		{segGen(s.GenTokPerSec), segPrefill(s.PrefillComputeTokPerSec)},
+		{segGen(s.GenTokPerSec)},
 	}
+	if s.SplitWorkers > 0 {
+		tiers = append([][]segment{{
+			segGen(s.GenTokPerSec),
+			segPrefill(s.PrefillComputeTokPerSec),
+			segCached(s.PrefillCacheTokPerSec),
+		}}, tiers...)
+	}
+	for i, tier := range tiers {
+		rendered := joinSegments(tier)
+		if i == len(tiers)-1 || lipgloss.Width(rendered) <= budget {
+			return rendered
+		}
+	}
+	return joinSegments(tiers[len(tiers)-1])
+}
 
-	return renderHeaderBar(header.String(), width)
+// segment is one labeled rate in the header throughput strip.
+type segment struct {
+	label string
+	value float64
+}
+
+func segGen(v float64) segment     { return segment{"gen", v} }
+func segPrefill(v float64) segment { return segment{"prefill", v} }
+func segCached(v float64) segment  { return segment{"cached", v} }
+
+func joinSegments(segments []segment) string {
+	var sb strings.Builder
+	for i, seg := range segments {
+		if i > 0 {
+			sb.WriteString(StyleHeaderDot.Render(" · "))
+		}
+		sb.WriteString(StyleHeaderStat.Render(seg.label))
+		sb.WriteString(" ")
+		sb.WriteString(StyleHeaderValue.Render(fmt.Sprintf("%s tok/s", formatTokRate(seg.value))))
+	}
+	return sb.String()
+}
+
+// formatTokRate renders a tokens/s rate compactly: 152, 1.5k, 25.4k.
+func formatTokRate(v float64) string {
+	if v >= 1000 {
+		return fmt.Sprintf("%.1fk", v/1000)
+	}
+	return fmt.Sprintf("%.0f", v)
 }
 
 // renderScrubIndicator formats the V1 time-travel position pill. With a T0
@@ -105,9 +178,14 @@ func formatScrubDuration(secs int) string {
 	return fmt.Sprintf("%dh%dm", secs/3600, (secs%3600)/60)
 }
 
-// renderCacheHitPill formats the cache hit percentage with color:
-// amber if <30%, green if ≥30%.
-func renderCacheHitPill(pct float64) string {
+// renderCacheHitPill formats the fleet cache hit percentage with color:
+// amber if <30%, green if ≥30%. When no worker reports a cache-hit metric at
+// all it renders a dim em dash — an amber 0% would claim a cache that never
+// hits, when the truth is that the backend has no such number.
+func renderCacheHitPill(pct float64, hasData bool) string {
+	if !hasData {
+		return StyleMetricNA.Render("\u2014")
+	}
 	text := fmt.Sprintf("%.0f%%", pct)
 	if pct < 30 {
 		return StyleHeaderAmber.Render(text)

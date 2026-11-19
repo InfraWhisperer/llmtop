@@ -99,7 +99,7 @@ func (a *App) runOnce(ctx context.Context) error {
 	case "json":
 		modelGroups := metrics.GroupWorkersByModel(workers)
 		envelope := struct {
-			Summary     metrics.FleetSummary    `json:"summary"`
+			Summary     metrics.FleetSummary     `json:"summary"`
 			Workers     []*metrics.WorkerMetrics `json:"workers"`
 			ModelGroups []metrics.ModelGroup     `json:"model_groups,omitempty"`
 			GPUSummary  *metrics.GPUSummary      `json:"gpu_summary,omitempty"`
@@ -285,7 +285,11 @@ func printTable(workers []*metrics.WorkerMetrics, summary metrics.FleetSummary, 
 			worker.ITL_P99,
 			xfer,
 			worker.CacheHitRatePct,
-			worker.GenTokPerSec+worker.PromptTokPerSec,
+			// Same rate every other surface shows. Hand-summing prompt+gen here
+			// made the scriptable output disagree with the TUI by exactly the
+			// prefix-cache reuse that issue #15 is about, so anything piping
+			// --once into a dashboard read an inflated number.
+			worker.DisplayTokPerSec(),
 		)
 	}
 	_ = w.Flush()

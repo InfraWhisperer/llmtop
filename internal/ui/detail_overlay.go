@@ -83,12 +83,34 @@ func RenderDetailOverlay(w *metrics.WorkerMetrics, gpus []*metrics.GPUInfo, widt
 		))
 	}
 	sb.WriteString(overlayMetricLine(
-		"Tok/s", fmt.Sprintf("%.0f", w.PromptTokPerSec+w.GenTokPerSec),
+		"Gen t/s", fmt.Sprintf("%.0f", w.GenTokPerSec),
 		"Queue", fmt.Sprintf("%d", w.RequestsWaiting),
 		innerWidth,
 	))
+	// Prefill side kept apart from generation: cache-side tokens were reused from
+	// the prefix/radix cache, not computed (issue #15). A backend without a split
+	// computed its whole prompt side, so it renders that as compute and an em dash
+	// for the cache half it never reports — never a 0 that reads as “prefill is
+	// stuck”.
+	preCacheStr := "\u2014"
+	if w.HasPrefillSplit() {
+		preCacheStr = fmt.Sprintf("%.0f", w.PrefillCacheTokPerSec)
+	}
 	sb.WriteString(overlayMetricLine(
-		"Hit rate", fmt.Sprintf("%.0f%%", w.CacheHitRatePct),
+		"Pre t/s", fmt.Sprintf("%.0f", w.PrefillComputeDisplayTokPerSec()),
+		"PreCache t/s", preCacheStr,
+		innerWidth,
+	))
+	// Detail surface → windowed hit rate when the collector produced one (current
+	// activity), lifetime ratio as fallback. A worker whose backend reports no
+	// cache-hit metric at all shows an em dash instead of a 0% that reads as a
+	// useless cache.
+	hitStr := "\u2014"
+	if w.ReportsCacheHit() {
+		hitStr = fmt.Sprintf("%.0f%%", w.CacheHitDisplayPct())
+	}
+	sb.WriteString(overlayMetricLine(
+		"Hit rate", hitStr,
 		"Evict/s", fmt.Sprintf("%.0f", w.EvictPerSec),
 		innerWidth,
 	))
@@ -138,7 +160,7 @@ func RenderDetailOverlay(w *metrics.WorkerMetrics, gpus []*metrics.GPUInfo, widt
 	)
 }
 
-func overlayRow(label, value string, width int) string {
+func overlayRow(label, value string, _ int) string {
 	return "  " + StyleDetailLabel.Render(fmt.Sprintf("%-14s", label)) +
 		StyleDetailValue.Render(value) + "\n"
 }
@@ -207,7 +229,7 @@ func renderLatencyBlock(label string, ls metrics.LatencySnapshot, innerWidth int
 	return line + "\n" + spark + "\n"
 }
 
-func overlayMetricLine(label1, val1, label2, val2 string, width int) string {
+func overlayMetricLine(label1, val1, label2, val2 string, _ int) string {
 	col1 := StyleDetailLabel.Render(fmt.Sprintf("  %-12s", label1)) + StyleDetailValue.Render(fmt.Sprintf("%-8s", val1))
 	col2 := StyleDetailLabel.Render(fmt.Sprintf("%-12s", label2)) + StyleDetailValue.Render(val2)
 	return col1 + col2 + "\n"
