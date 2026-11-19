@@ -285,7 +285,11 @@ func printTable(workers []*metrics.WorkerMetrics, summary metrics.FleetSummary, 
 			worker.ITL_P99,
 			xfer,
 			worker.CacheHitRatePct,
-			worker.GenTokPerSec+worker.PromptTokPerSec,
+			// Same rate every other surface shows. Hand-summing prompt+gen here
+			// made the scriptable output disagree with the TUI by exactly the
+			// prefix-cache reuse that issue #15 is about, so anything piping
+			// --once into a dashboard read an inflated number.
+			worker.DisplayTokPerSec(),
 		)
 	}
 	_ = w.Flush()

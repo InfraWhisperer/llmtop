@@ -58,21 +58,107 @@ func TestRenderHeader_NarrowDoesNotPanic(t *testing.T) {
 
 func TestRenderHeader_ContainsKeyMetrics(t *testing.T) {
 	summary := metrics.FleetSummary{
-		TotalWorkers:   9,
-		OnlineWorkers:  8,
-		TotalTokPerSec: 1500,
-		AvgKVPercGPU:   45.0,
-		P99TTFT:        120.0,
-		PrefillCount:   3,
-		DecodeCount:    5,
+		TotalWorkers:            9,
+		OnlineWorkers:           8,
+		TotalTokPerSec:          1500,
+		GenTokPerSec:            1000,
+		PrefillComputeTokPerSec: 500,
+		AvgCacheHit:             45.0,
+		CacheHitWorkers:         6,
+		AvgKVPercGPU:            71.0,
+		P99TTFT:                 120.0,
+		PrefillCount:            3,
+		DecodeCount:             5,
 	}
 
 	result := RenderHeader(summary, "vdev", 2, 200, 0, time.Time{})
 
-	for _, want := range []string{"llmtop", "vdev", "9 workers", "1500 tok/s", "45%", "120ms", "3P", "5D"} {
+	// The blended fleet rate is gone by design: one number that mixes decode
+	// throughput with prompt throughput is what made #15 unreadable. The header
+	// shows each side under its own label instead, so the assertions are per
+	// segment.
+	for _, want := range []string{"llmtop", "vdev", "9 workers", "gen 1.0k tok/s", "prefill 500 tok/s", "45%", "120ms", "3P", "5D"} {
 		if !strings.Contains(result, want) {
 			t.Errorf("header missing %q", want)
 		}
+	}
+
+	// The cache-hit pill must read the hit rate, not KV occupancy: with the two
+	// set apart here, only the hit rate may appear.
+	if strings.Contains(result, "71%") {
+		t.Errorf("header rendered KV occupancy (%.0f%%) as the cache hit rate", summary.AvgKVPercGPU)
+	}
+}
+
+func TestRenderHeader_CachedSegmentOnlyWhenSplitReported(t *testing.T) {
+	split := metrics.FleetSummary{
+		TotalWorkers:            2,
+		OnlineWorkers:           2,
+		GenTokPerSec:            150,
+		PrefillComputeTokPerSec: 900,
+		PrefillCacheTokPerSec:   25000,
+		SplitWorkers:            1,
+	}
+
+	wide := RenderHeader(split, "vdev", 2, 200, 0, time.Time{})
+	if !strings.Contains(wide, "cached 25.0k tok/s") {
+		t.Errorf("split fleet should render the cached segment, got %q", wide)
+	}
+
+	// Same numbers, but no worker reports the split (vLLM / NIM / TGI …): a
+	// "cached 0 tok/s" segment would describe a metric that was never sent.
+	unsplit := split
+	unsplit.SplitWorkers = 0
+	unsplit.PrefillCacheTokPerSec = 0
+	unsplit.PrefillComputeTokPerSec = 25900
+	out := RenderHeader(unsplit, "vdev", 2, 200, 0, time.Time{})
+	if strings.Contains(out, "cached") {
+		t.Errorf("backend without a split must not render a cached segment, got %q", out)
+	}
+}
+
+func TestRenderHeader_NarrowDropsCachedWithoutFoldingItBack(t *testing.T) {
+	// The richest tier costs ~30 cells; at 110 the bar cannot afford it. Dropping
+	// to gen+prefill must not push the reused tokens back into "prefill" — that
+	// fold is the number #15 exists to stop showing.
+	summary := metrics.FleetSummary{
+		TotalWorkers:            1,
+		OnlineWorkers:           1,
+		TotalTokPerSec:          1050,
+		GenTokPerSec:            150,
+		PrefillComputeTokPerSec: 900,
+		PrefillCacheTokPerSec:   25000,
+		SplitWorkers:            1,
+	}
+
+	wide := RenderHeader(summary, "vdev", 2, 200, 0, time.Time{})
+	narrow := RenderHeader(summary, "vdev", 2, 110, 0, time.Time{})
+
+	if !strings.Contains(wide, "cached") {
+		t.Fatalf("expected the wide header to carry the cached segment: %q", wide)
+	}
+	if strings.Contains(narrow, "cached") {
+		t.Fatalf("expected the narrow header to drop the cached segment: %q", narrow)
+	}
+	for _, forbidden := range []string{"25.9k", "26.0k", "25900"} {
+		if strings.Contains(narrow, forbidden) {
+			t.Errorf("narrow header folded reused tokens back into prefill (found %q): %q", forbidden, narrow)
+		}
+	}
+	if !strings.Contains(narrow, "prefill 900 tok/s") {
+		t.Errorf("narrow header should keep prefill at its computed 900 tok/s: %q", narrow)
+	}
+}
+
+func TestRenderHeader_CacheHitPillDistinguishesNoDataFromZero(t *testing.T) {
+	noData := metrics.FleetSummary{TotalWorkers: 1, OnlineWorkers: 1}
+	if out := RenderHeader(noData, "vdev", 2, 200, 0, time.Time{}); strings.Contains(out, "cache hit 0%") {
+		t.Errorf("a fleet with no cache-hit metric rendered a 0%% pill (claims the cache never hits): %q", out)
+	}
+
+	realZero := metrics.FleetSummary{TotalWorkers: 1, OnlineWorkers: 1, CacheHitWorkers: 1}
+	if out := RenderHeader(realZero, "vdev", 2, 200, 0, time.Time{}); !strings.Contains(out, "cache hit 0%") {
+		t.Errorf("a worker that reports 0%% reuse must still render 0%%: %q", out)
 	}
 }
 
