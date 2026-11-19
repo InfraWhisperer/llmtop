@@ -113,14 +113,22 @@ func parseSGLangMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, p
 func applySGLangCacheHit(m *metrics.WorkerMetrics, pm *metrics.ParsedMetrics, c sglangCounterRead, prevCounters counterState, splitOK, haveWindow bool) {
 	if c.split && c.prompt > 0 {
 		m.CacheHitRatePct = clampPct(c.prefillCache / c.prompt * 100)
+		m.CacheHitReported = true
 	} else if v, _, ok := pm.GetGaugeAny("sglang:cache_hit_rate"); ok {
 		m.CacheHitRatePct = v * 100
+		m.CacheHitReported = true
 	}
 	if splitOK && haveWindow {
 		dPrompt := seriesDelta(prevCounters.promptSeries, c.promptSeries, prevCounters.promptTokensTotal, c.prompt)
 		dCache := seriesDelta(prevCounters.prefillCacheSeries, c.cacheSeries, prevCounters.prefillCacheTokensTotal, c.prefillCache)
+		// A window that prefilled tokens but reused none is a measurement of 0%, not
+		// an absence of data: it sets the value and the measured flag rather than
+		// leaving both at their zero, so a collapse in reuse shows up on the detail
+		// row instead of hiding behind the lifetime ratio (issue #15, hit-rate axis).
 		if dPrompt > 0 && dCache <= dPrompt {
 			m.CacheHitWindowPct = clampPct(dCache / dPrompt * 100)
+			m.CacheHitWindowQueries = dPrompt
+			m.CacheHitWindowMeasured = true
 		}
 	}
 }

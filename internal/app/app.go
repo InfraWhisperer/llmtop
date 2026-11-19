@@ -99,7 +99,7 @@ func (a *App) runOnce(ctx context.Context) error {
 	case "json":
 		modelGroups := metrics.GroupWorkersByModel(workers)
 		envelope := struct {
-			Summary     metrics.FleetSummary    `json:"summary"`
+			Summary     metrics.FleetSummary     `json:"summary"`
 			Workers     []*metrics.WorkerMetrics `json:"workers"`
 			ModelGroups []metrics.ModelGroup     `json:"model_groups,omitempty"`
 			GPUSummary  *metrics.GPUSummary      `json:"gpu_summary,omitempty"`

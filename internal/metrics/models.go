@@ -76,6 +76,23 @@ type WorkerMetrics struct {
 	// the backend exposes counters (matching vLLM hits_total/queries_total),
 	// so the header stays stable while this field feeds the detail row.
 	CacheHitWindowPct float64 `json:"cache_hit_window_pct"` // 0-100
+	// CacheHitWindowMeasured says CacheHitWindowPct was computed from a real
+	// window this poll — the denominator moved, whether or not any of it hit.
+	// Without it, 0 is overloaded: it means both “nothing hit this window” and
+	// “no query landed”, and the second reading silently shows the lifetime ratio
+	// where a collapse to zero should be visible.
+	CacheHitWindowMeasured bool `json:"cache_hit_window_measured"`
+	// CacheHitWindowQueries is the denominator behind CacheHitWindowPct — prompt
+	// tokens (SGLang) or cache queries (vLLM) observed in that window. It lets the
+	// fleet mean report how much evidence sits behind its windowed rate, so one
+	// worker that saw two tokens counts the same as one that saw two million.
+	CacheHitWindowQueries float64 `json:"cache_hit_window_queries"`
+	// CacheHitReported is the capability half of the same tri-state: the backend
+	// exposed a prefix-cache hit signal at all this poll (counters or gauge),
+	// independent of its value. A fleet of workers all reporting a genuine 0%
+	// reuse is a finding; a fleet that sends no such metric is not, and the two
+	// must not render as the same amber 0%.
+	CacheHitReported bool `json:"cache_hit_reported"`
 
 	// Latency (milliseconds) — legacy scalar fields kept for backward compatibility.
 	TTFT_P50 float64 `json:"ttft_p50"`
@@ -162,25 +179,62 @@ func (w *WorkerMetrics) DisplayTokPerSec() float64 {
 	return w.PrefillComputeDisplayTokPerSec() + w.GenTokPerSec
 }
 
+// cacheWindowMeasured says this worker's CacheHitWindowPct came from a real
+// window this poll. The collector sets CacheHitWindowMeasured explicitly; a
+// nonzero value implies it, since a window rate cannot be nonzero without a
+// measurement. The flag is only load-bearing at exactly 0%, which is the case
+// that has to tell “the window was measured and nothing was reused” from “no
+// window was measured” — hand-built metrics and collectors that have not adopted
+// the flag yet still read correctly through the value check.
+func (w *WorkerMetrics) cacheWindowMeasured() bool {
+	return w.CacheHitWindowMeasured || w.CacheHitWindowPct > 0
+}
+
 // CacheHitDisplayPct is the hit rate to show for a single worker: the windowed
 // rate the collector derived from counter deltas when the backend exposes them,
 // otherwise the backend-reported cumulative ratio. Windowed first because a
 // lifetime 89% reuse hides the collapse of the last few polls (issue #15,
 // hit-rate axis); fleet-level averages keep using the cumulative field.
 func (w *WorkerMetrics) CacheHitDisplayPct() float64 {
-	if w.CacheHitWindowPct > 0 {
+	if w.cacheWindowMeasured() {
 		return w.CacheHitWindowPct
 	}
 	return w.CacheHitRatePct
 }
 
 // ReportsCacheHit says whether this worker's backend exposes a cache-hit signal
-// at all, over either window. A zero from a backend that reports the metric is a
-// real 0% reuse rate; a zero from one that never reported it is missing data,
-// and the two must not render the same way — a 0% pill tells the operator the
-// cache is useless when in fact nothing was measured.
+// at all. A zero from a backend that reports the metric is a real 0% reuse rate;
+// a zero from one that never reported it is missing data, and the two must not
+// render the same way — a 0% pill tells the operator the cache is useless when in
+// fact nothing was measured.
+//
+// The collector sets CacheHitReported when it read the signal. The value checks
+// are the fallback for hand-built metrics and for collectors that have not
+// adopted the flag yet.
 func (w *WorkerMetrics) ReportsCacheHit() bool {
-	return w.CacheHitRatePct > 0 || w.CacheHitWindowPct > 0
+	return w.CacheHitReported || w.CacheHitRatePct > 0 || w.cacheWindowMeasured()
+}
+
+// CacheHitAlertPct is the cluster hit rate a change detector should compare
+// across polls, plus whether there is a rate to compare at all.
+//
+// It prefers the windowed mean: on counter-backed engines AvgCacheHit is a
+// lifetime cumulative ratio that moves by hundredths of a point per poll, so a
+// drop threshold on it is unreachable while a routing change moves the windowed
+// rate by tens of points immediately. When no worker measured a window this
+// poll (gauge-only backends, idle engines), it falls back to the cumulative
+// mean, which is the only signal those deployments have.
+//
+// The bool is false when nothing reports a cache-hit signal, so callers do not
+// read the zero as "the cluster hit rate is 0%".
+func (s FleetSummary) CacheHitAlertPct() (float64, bool) {
+	if s.CacheHitWindowWorkers > 0 {
+		return s.AvgCacheHitWindow, true
+	}
+	if s.CacheHitWorkers > 0 {
+		return s.AvgCacheHit, true
+	}
+	return 0, false
 }
 
 // FleetSummary aggregates metrics across all workers.
@@ -193,10 +247,19 @@ type FleetSummary struct {
 	// all (windowed or lifetime). A fleet where nothing reports it must render
 	// "—", not a 0% pill: "0%" claims the cache never hits, which is a different
 	// statement from "this backend has no cache-hit metric".
-	CacheHitWorkers int     `json:"cache_hit_workers"`
-	AvgKVPercGPU    float64 `json:"avg_kv_perc_gpu"` // cluster-wide average GPU KV cache usage (0-100)
-	P99TTFT         float64 `json:"p99_ttft"`
-	TotalTokPerSec  float64 `json:"total_tok_per_sec"`
+	CacheHitWorkers int `json:"cache_hit_workers"`
+	// AvgCacheHitWindow is the mean over workers that measured a hit rate over a
+	// window this poll (CacheHitWindowWorkers of them), and CacheHitWindowSamples
+	// is the total number of window queries behind that mean. The change detector
+	// reads these, not AvgCacheHit: AvgCacheHit is a lifetime-cumulative ratio on
+	// counter-backed backends, which moves by hundredths of a point per poll, so
+	// an alert on a 10-point drop of it could never fire.
+	AvgCacheHitWindow     float64 `json:"avg_cache_hit_window"`
+	CacheHitWindowWorkers int     `json:"cache_hit_window_workers"`
+	CacheHitWindowSamples float64 `json:"cache_hit_window_samples"`
+	AvgKVPercGPU          float64 `json:"avg_kv_perc_gpu"` // cluster-wide average GPU KV cache usage (0-100)
+	P99TTFT               float64 `json:"p99_ttft"`
+	TotalTokPerSec        float64 `json:"total_tok_per_sec"`
 	// Segment rates over online workers, so a surface can show the two sides of
 	// the pipeline separately instead of one blended number.
 	//
@@ -226,6 +289,9 @@ func ComputeFleetSummary(workers []*WorkerMetrics) FleetSummary {
 	}
 	var cacheHitSum float64
 	var cacheCount int
+	var cacheWindowSum float64
+	var cacheWindowCount int
+	var cacheWindowSamples float64
 	var kvGPUSum float64
 	var kvGPUCount int
 	var maxTTFT float64
@@ -245,9 +311,14 @@ func ComputeFleetSummary(workers []*WorkerMetrics) FleetSummary {
 				s.SplitWorkers++
 				s.PrefillCacheTokPerSec += w.PrefillCacheTokPerSec
 			}
-			if hit := w.CacheHitDisplayPct(); hit > 0 {
-				cacheHitSum += hit
+			if w.ReportsCacheHit() {
+				cacheHitSum += w.CacheHitDisplayPct()
 				cacheCount++
+			}
+			if w.cacheWindowMeasured() {
+				cacheWindowSum += w.CacheHitWindowPct
+				cacheWindowCount++
+				cacheWindowSamples += w.CacheHitWindowQueries
 			}
 			if w.KVCacheUsagePct > 0 {
 				kvGPUSum += w.KVCacheUsagePct
@@ -262,6 +333,11 @@ func ComputeFleetSummary(workers []*WorkerMetrics) FleetSummary {
 		s.AvgCacheHit = cacheHitSum / float64(cacheCount)
 	}
 	s.CacheHitWorkers = cacheCount
+	if cacheWindowCount > 0 {
+		s.AvgCacheHitWindow = cacheWindowSum / float64(cacheWindowCount)
+	}
+	s.CacheHitWindowWorkers = cacheWindowCount
+	s.CacheHitWindowSamples = cacheWindowSamples
 	if kvGPUCount > 0 {
 		s.AvgKVPercGPU = kvGPUSum / float64(kvGPUCount)
 	}

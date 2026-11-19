@@ -151,7 +151,11 @@ type Model struct {
 	alertMgr         *metrics.AlertManager
 	alertSelectedIdx int
 	prevClusterHit   float64
-	prevClusterHitAt time.Time
+	// prevClusterHitMeasured records whether the previous poll actually had a
+	// cluster hit rate to compare, so a drop from a measured 0% is distinguishable
+	// from “no baseline yet” (see metrics.AlertState).
+	prevClusterHitMeasured bool
+	prevClusterHitAt       time.Time
 
 	// Filter bar state
 	filterText   string
@@ -362,13 +366,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Evaluate alert rules
 		if m.alertMgr != nil {
 			m.alertMgr.Evaluate(&metrics.AlertState{
-				Workers:        m.workers,
-				GPUs:           m.gpus,
-				Summary:        m.summary,
-				PrevCacheHit:   m.prevClusterHit,
-				PrevCacheHitAt: m.prevClusterHitAt,
+				Workers:              m.workers,
+				GPUs:                 m.gpus,
+				Summary:              m.summary,
+				PrevCacheHit:         m.prevClusterHit,
+				PrevCacheHitMeasured: m.prevClusterHitMeasured,
+				PrevCacheHitAt:       m.prevClusterHitAt,
+				CacheHitWindowAgeSec: m.intervalSec,
 			})
-			m.prevClusterHit = m.summary.AvgCacheHit
+			// Baseline the next comparison on the same basis the rule reads
+			// (windowed first, cumulative fallback), and carry its measured flag so a
+			// fleet with no cache-hit signal never produces a comparison against 0.
+			curHit, curHitOK := m.summary.CacheHitAlertPct()
+			m.prevClusterHit = curHit
+			m.prevClusterHitMeasured = curHitOK
 			m.prevClusterHitAt = time.Now()
 		}
 

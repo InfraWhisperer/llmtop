@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -191,19 +192,140 @@ func TestAlertManagerECCError(t *testing.T) {
 	}
 }
 
-func TestAlertManagerCacheHitDrop(t *testing.T) {
-	am := NewAlertManager()
-
-	state := &AlertState{
-		Summary:        FleetSummary{AvgCacheHit: 20},
-		PrevCacheHit:   40,
-		PrevCacheHitAt: time.Now().Add(-30 * time.Second),
+// cacheHitState builds an AlertState whose previous baseline is the given value
+// and measured-ness, with a fresh cluster reading. cache_hit_drop has no sustain
+// delay, so a single Evaluate is enough to see whether it fires.
+func cacheHitState(summary FleetSummary, prev float64, prevMeasured bool, prevAge time.Duration) *AlertState {
+	return &AlertState{
+		Summary:              summary,
+		PrevCacheHit:         prev,
+		PrevCacheHitMeasured: prevMeasured,
+		PrevCacheHitAt:       time.Now().Add(-prevAge),
+		CacheHitWindowAgeSec: 2,
 	}
+}
 
-	am.Evaluate(state)
-	_, w, _ := am.Counts()
-	if w == 0 {
-		t.Error("expected cache_hit_drop warning")
+// The rule compares like with like: it reads the windowed fleet mean when any
+// worker measured a window, and only falls back to the cumulative mean when none
+// did (gauge-only backends). See FleetSummary.CacheHitAlertPct.
+func TestCacheHitAlertPctBasis(t *testing.T) {
+	tests := []struct {
+		name    string
+		summary FleetSummary
+		want    float64
+		wantOK  bool
+	}{
+		{
+			name:    "window preferred over cumulative",
+			summary: FleetSummary{AvgCacheHit: 89, CacheHitWorkers: 4, AvgCacheHitWindow: 12, CacheHitWindowWorkers: 2},
+			want:    12, wantOK: true,
+		},
+		{
+			name:    "windowed zero is a reading, not a fallback",
+			summary: FleetSummary{AvgCacheHit: 89, CacheHitWorkers: 4, CacheHitWindowWorkers: 2},
+			want:    0, wantOK: true,
+		},
+		{
+			name:    "cumulative fallback when no window",
+			summary: FleetSummary{AvgCacheHit: 33, CacheHitWorkers: 1},
+			want:    33, wantOK: true,
+		},
+		{
+			name:    "nothing reports the metric",
+			summary: FleetSummary{TotalWorkers: 3, OnlineWorkers: 3},
+			want:    0, wantOK: false,
+		},
+	}
+	for _, tc := range tests {
+		got, ok := tc.summary.CacheHitAlertPct()
+		if got != tc.want || ok != tc.wantOK {
+			t.Errorf("%s: CacheHitAlertPct() = %v, %v, want %v, %v", tc.name, got, ok, tc.want, tc.wantOK)
+		}
+	}
+}
+
+func TestAlertManagerCacheHitDrop(t *testing.T) {
+	tests := []struct {
+		name      string
+		state     *AlertState
+		wantFired bool
+	}{
+		{
+			name: "cumulative drop on a gauge-only fleet",
+			state: cacheHitState(FleetSummary{AvgCacheHit: 20, CacheHitWorkers: 2},
+				40, true, 30*time.Second),
+			wantFired: true,
+		},
+		{
+			// The case the lifetime ratio could never produce: reuse collapsed to
+			// nothing this window while the cumulative ratio still reads high.
+			name: "window collapses to a measured zero",
+			state: cacheHitState(FleetSummary{AvgCacheHit: 89, CacheHitWorkers: 4, CacheHitWindowWorkers: 4},
+				89, true, 30*time.Second),
+			wantFired: true,
+		},
+		{
+			// A baseline of 0 that was never measured is “no data yet”, and
+			// comparing against it would fire on missing data rather than on a drop.
+			name: "no baseline yet",
+			state: cacheHitState(FleetSummary{AvgCacheHit: 20, CacheHitWorkers: 2},
+				0, false, time.Second),
+			wantFired: false,
+		},
+		{
+			name: "fleet reports no cache-hit metric",
+			state: cacheHitState(FleetSummary{TotalWorkers: 3, OnlineWorkers: 3},
+				40, true, 30*time.Second),
+			wantFired: false,
+		},
+		{
+			name: "baseline older than the comparison window",
+			state: cacheHitState(FleetSummary{AvgCacheHit: 20, CacheHitWorkers: 2},
+				40, true, 5*time.Minute),
+			wantFired: false,
+		},
+		{
+			name: "drop within threshold",
+			state: cacheHitState(FleetSummary{AvgCacheHit: 33, CacheHitWorkers: 2},
+				40, true, 30*time.Second),
+			wantFired: false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			am := NewAlertManager()
+			am.Evaluate(tc.state)
+			_, w, _ := am.Counts()
+			if fired := w > 0; fired != tc.wantFired {
+				t.Fatalf("fired = %v, want %v (alerts: %v)", fired, tc.wantFired, titlesOf(am.All()))
+			}
+		})
+	}
+}
+
+func titlesOf(alerts []*Alert) []string {
+	out := make([]string, 0, len(alerts))
+	for _, a := range alerts {
+		out = append(out, a.Title)
+	}
+	return out
+}
+
+// The alert must state what it compared, or an operator cannot tell a windowed
+// collapse from a slow cumulative drift.
+func TestAlertManagerCacheHitDropStatesBasis(t *testing.T) {
+	am := NewAlertManager()
+	am.Evaluate(cacheHitState(FleetSummary{AvgCacheHit: 89, CacheHitWorkers: 4, AvgCacheHitWindow: 12, CacheHitWindowWorkers: 2},
+		89, true, 30*time.Second))
+	alerts := am.All()
+	if len(alerts) != 1 {
+		t.Fatalf("expected 1 alert, got %d", len(alerts))
+	}
+	if !strings.Contains(alerts[0].Title, "89% → 12%") {
+		t.Errorf("title %q, want the windowed before → after rates", alerts[0].Title)
+	}
+	if !strings.Contains(alerts[0].Detail, "2s window") {
+		t.Errorf("detail %q, want the window length it compared over", alerts[0].Detail)
 	}
 }
 

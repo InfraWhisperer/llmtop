@@ -11,8 +11,9 @@ import (
 // safe to use; call DefaultAlertThresholds() for production defaults.
 //
 // Invariants enforced by callers (config parser):
-//   KVCriticalPct > KVPressurePct
-//   All *Delay fields >= 0
+//
+//	KVCriticalPct > KVPressurePct
+//	All *Delay fields >= 0
 type AlertThresholds struct {
 	KVCriticalPct      float64       // default 90; must be > KVPressurePct
 	KVPressurePct      float64       // default 75
@@ -52,7 +53,7 @@ func DefaultAlertThresholds() AlertThresholds {
 type AlertSeverity int
 
 const (
-	AlertInfo     AlertSeverity = iota
+	AlertInfo AlertSeverity = iota
 	AlertWarning
 	AlertCritical
 )
@@ -100,23 +101,33 @@ type AlertRule struct {
 
 // AlertState holds the snapshot data the rules evaluate against.
 type AlertState struct {
-	Workers        []*WorkerMetrics
-	GPUs           []*GPUInfo
-	Summary        FleetSummary
-	PrevCacheHit   float64   // cluster cache hit from previous eval
-	PrevCacheHitAt time.Time // timestamp of previous cache hit reading
+	Workers      []*WorkerMetrics
+	GPUs         []*GPUInfo
+	Summary      FleetSummary
+	PrevCacheHit float64 // cluster cache hit from previous eval, on the basis CacheHitAlertPct chooses
+	// PrevCacheHitMeasured distinguishes a previous eval that measured 0% from one
+	// that measured nothing. Without it a drop from a real 0% cannot be told apart
+	// from “no baseline yet”, and the rule would either never fire or fire on
+	// missing data.
+	PrevCacheHitMeasured bool
+	PrevCacheHitAt       time.Time // timestamp of previous cache hit reading
+	// CacheHitWindowAgeSec is how long the poll window behind the windowed hit
+	// rate is, so the alert can say what interval its comparison covers. It comes
+	// from the caller's refresh interval, not from the summary, because the
+	// summary aggregates windows measured over that interval.
+	CacheHitWindowAgeSec int
 }
 
 // AlertManager evaluates rules against model state and manages alert lifecycle.
 type AlertManager struct {
-	mu       sync.Mutex
-	rules    []AlertRule
-	active   map[string]*Alert  // keyed by rule name + source
-	resolved []*Alert           // last N resolved alerts
+	mu          sync.Mutex
+	rules       []AlertRule
+	active      map[string]*Alert // keyed by rule name + source
+	resolved    []*Alert          // last N resolved alerts
 	maxResolved int
 
 	// Duration thresholds: how long a condition must persist before firing
-	pending  map[string]time.Time // keyed by rule+source, tracks when condition first seen
+	pending map[string]time.Time // keyed by rule+source, tracks when condition first seen
 
 	thresholds AlertThresholds
 }
@@ -270,9 +281,9 @@ func evalRule(rule AlertRule, state *AlertState, t AlertThresholds) []*Alert {
 		for _, w := range state.Workers {
 			if w.Online && w.ITL_P99 > t.ITLSpikeMs {
 				alerts = append(alerts, &Alert{
-					Severity: AlertCritical,
-					Title:    fmt.Sprintf("ITL p99 spike on %s: %.0fms (threshold %.0fms)", w.Label, w.ITL_P99, t.ITLSpikeMs),
-					Detail:   fmt.Sprintf("Worker KV%% %.0f%% · consider KV eviction cascade", w.KVCacheUsagePct),
+					Severity:       AlertCritical,
+					Title:          fmt.Sprintf("ITL p99 spike on %s: %.0fms (threshold %.0fms)", w.Label, w.ITL_P99, t.ITLSpikeMs),
+					Detail:         fmt.Sprintf("Worker KV%% %.0f%% · consider KV eviction cascade", w.KVCacheUsagePct),
 					Source:         w.Label,
 					SourceEndpoint: w.Endpoint,
 					FiredAt:        time.Now(),
@@ -283,9 +294,9 @@ func evalRule(rule AlertRule, state *AlertState, t AlertThresholds) []*Alert {
 		for _, w := range state.Workers {
 			if !w.Online {
 				alerts = append(alerts, &Alert{
-					Severity: AlertCritical,
-					Title:    fmt.Sprintf("Scrape failure: %s — all metrics Err", w.Label),
-					Detail:   "vLLM /metrics unreachable · pod Running but port closed",
+					Severity:       AlertCritical,
+					Title:          fmt.Sprintf("Scrape failure: %s — all metrics Err", w.Label),
+					Detail:         "vLLM /metrics unreachable · pod Running but port closed",
 					Source:         w.Label,
 					SourceEndpoint: w.Endpoint,
 					FiredAt:        time.Now(),
@@ -296,9 +307,9 @@ func evalRule(rule AlertRule, state *AlertState, t AlertThresholds) []*Alert {
 		for _, w := range state.Workers {
 			if w.Online && w.KVCacheUsagePct > t.KVCriticalPct {
 				alerts = append(alerts, &Alert{
-					Severity: AlertCritical,
-					Title:    fmt.Sprintf("KV cache critical on %s: %.0f%%", w.Label, w.KVCacheUsagePct),
-					Detail:   fmt.Sprintf("GPU KV cache >%.0f%% · likely eviction cascade", t.KVCriticalPct),
+					Severity:       AlertCritical,
+					Title:          fmt.Sprintf("KV cache critical on %s: %.0f%%", w.Label, w.KVCacheUsagePct),
+					Detail:         fmt.Sprintf("GPU KV cache >%.0f%% · likely eviction cascade", t.KVCriticalPct),
 					Source:         w.Label,
 					SourceEndpoint: w.Endpoint,
 					FiredAt:        time.Now(),
@@ -321,9 +332,9 @@ func evalRule(rule AlertRule, state *AlertState, t AlertThresholds) []*Alert {
 		for _, w := range state.Workers {
 			if w.Online && w.Role == "prefill" && w.RequestsWaiting > t.PrefillQueueDepth {
 				alerts = append(alerts, &Alert{
-					Severity: AlertWarning,
-					Title:    fmt.Sprintf("Prefill queue depth elevated on %s: queue=%d (threshold %d)", w.Label, w.RequestsWaiting, t.PrefillQueueDepth),
-					Detail:   fmt.Sprintf("KV%% %.0f%% · TTFT p99 %.0fms · consider scale-out or rebalance", w.KVCacheUsagePct, w.TTFT_P99),
+					Severity:       AlertWarning,
+					Title:          fmt.Sprintf("Prefill queue depth elevated on %s: queue=%d (threshold %d)", w.Label, w.RequestsWaiting, t.PrefillQueueDepth),
+					Detail:         fmt.Sprintf("KV%% %.0f%% · TTFT p99 %.0fms · consider scale-out or rebalance", w.KVCacheUsagePct, w.TTFT_P99),
 					Source:         w.Label,
 					SourceEndpoint: w.Endpoint,
 					FiredAt:        time.Now(),
@@ -331,15 +342,30 @@ func evalRule(rule AlertRule, state *AlertState, t AlertThresholds) []*Alert {
 			}
 		}
 	case "cache_hit_drop":
-		if state.PrevCacheHit > 0 && state.Summary.AvgCacheHit > 0 {
-			drop := state.PrevCacheHit - state.Summary.AvgCacheHit
-			if drop > t.CacheHitDropPP && time.Since(state.PrevCacheHitAt) <= 60*time.Second {
+		// Change detection needs the windowed rate. AvgCacheHit is a
+		// lifetime-cumulative ratio on counter-backed backends — hits_total /
+		// queries_total over the engine's whole life — so it moves by hundredths of a
+		// point per poll and a 10-point drop threshold could not be met outside a
+		// restart. The window is what actually carries a routing change, so the rule
+		// reads the mean over workers whose denominator moved this poll; workers
+		// reporting a measured 0% count toward it, workers that reported nothing do
+		// not.
+		cur, curOK := state.Summary.CacheHitAlertPct()
+		prev, prevOK := state.PrevCacheHit, state.PrevCacheHitMeasured
+		if prevOK && curOK && time.Since(state.PrevCacheHitAt) <= 60*time.Second {
+			drop := prev - cur
+			if drop > t.CacheHitDropPP {
+				basis := "lifetime"
+				if state.Summary.CacheHitWindowWorkers > 0 {
+					basis = fmt.Sprintf("%ds window", state.CacheHitWindowAgeSec)
+				}
 				alerts = append(alerts, &Alert{
 					Severity: AlertWarning,
-					Title:    fmt.Sprintf("Cluster cache hit rate fell below %.0f%%: currently %.0f%%", state.PrevCacheHit, state.Summary.AvgCacheHit),
-					Detail:   fmt.Sprintf("Was %.0f%% at %s · prefix affinity routing may be degraded", state.PrevCacheHit, state.PrevCacheHitAt.Format("15:04:05")),
-					Source:   "cluster",
-					FiredAt:  time.Now(),
+					Title:    fmt.Sprintf("Cluster cache hit rate fell %.0fpp: %.0f%% → %.0f%%", drop, prev, cur),
+					Detail: fmt.Sprintf("Compared on %s over %d reporting worker(s) · prefix affinity routing may be degraded",
+						basis, state.Summary.CacheHitWorkers),
+					Source:  "cluster",
+					FiredAt: time.Now(),
 				})
 			}
 		}
@@ -359,9 +385,9 @@ func evalRule(rule AlertRule, state *AlertState, t AlertThresholds) []*Alert {
 		for _, w := range state.Workers {
 			if w.Online && w.KVCacheUsagePct >= t.KVPressurePct && w.KVCacheUsagePct < t.KVCriticalPct {
 				alerts = append(alerts, &Alert{
-					Severity: AlertWarning,
-					Title:    fmt.Sprintf("KV cache pressure on %s: %.0f%%", w.Label, w.KVCacheUsagePct),
-					Detail:   fmt.Sprintf("GPU KV cache %.0f-%.0f%% · approaching eviction threshold", t.KVPressurePct, t.KVCriticalPct-1),
+					Severity:       AlertWarning,
+					Title:          fmt.Sprintf("KV cache pressure on %s: %.0f%%", w.Label, w.KVCacheUsagePct),
+					Detail:         fmt.Sprintf("GPU KV cache %.0f-%.0f%% · approaching eviction threshold", t.KVPressurePct, t.KVCriticalPct-1),
 					Source:         w.Label,
 					SourceEndpoint: w.Endpoint,
 					FiredAt:        time.Now(),

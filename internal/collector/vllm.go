@@ -89,6 +89,12 @@ func parseVLLMMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, pre
 	// instantaneous-source trap as issue #15 cause 5, previously hidden under the
 	// header's KV% label. The gauge stays as the fallback for builds that export
 	// neither counter.
+	//
+	// Counter naming (V1): the docs register these as vllm:prefix_cache_queries and
+	// vllm:prefix_cache_hits; prometheus_client appends the _total suffix that
+	// counters carry in the text exposition, which is the name read here. V0 builds
+	// exported no such pair (only the gpu_-prefixed hit-rate gauge), so they land on
+	// the fallback above rather than reporting 0%.
 	now := time.Now()
 	hits, hitsTotal, okHits := pm.GaugeSeries("vllm:prefix_cache_hits_total", nil)
 	queries, queriesTotal, okQueries := pm.GaugeSeries("vllm:prefix_cache_queries_total", nil)
@@ -98,8 +104,10 @@ func parseVLLMMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, pre
 
 	if okHits && okQueries && queriesTotal > 0 {
 		m.CacheHitRatePct = clampPct(hitsTotal / queriesTotal * 100)
+		m.CacheHitReported = true
 	} else if v, _, ok := pm.GetGaugeAny("vllm:gpu_prefix_cache_hit_rate"); ok {
 		m.CacheHitRatePct = v * 100
+		m.CacheHitReported = true
 	}
 
 	dt, windowOK := prevCounters.rateWindow(now)
@@ -115,13 +123,21 @@ func parseVLLMMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, pre
 		if okPreempt {
 			m.EvictPerSec = seriesRate(prevCounters.preemptSeries, preempt, prevCounters.preemptionsTotal, preemptTotal, dt)
 		}
-		// Windowed hit rate for the detail row: Δhits/Δqueries over this poll,
-		// left unset (rather than 0 %) when no query landed in the window.
+		// Windowed hit rate for the detail row: Δhits/Δqueries over this poll.
+		// A window in which queries landed but none hit is a measurement of 0%, so
+		// it sets the value and the measured flag rather than leaving the field at
+		// its zero — that silence is what let a collapse in reuse read as “no data
+		// yet” and keep showing the lifetime ratio (issue #15's hit-rate axis).
+		// dHits > dQueries is inconsistent (a restarted series after a clamped
+		// sibling), and a ratio over mismatched denominators is not a rate, so that
+		// window is not reported as measured.
 		if okHits && okQueries {
 			dQueries := seriesDelta(prevCounters.prefixQueriesSeries, queries, 0, queriesTotal)
 			dHits := seriesDelta(prevCounters.prefixHitsSeries, hits, 0, hitsTotal)
 			if dQueries > 0 && dHits <= dQueries {
 				m.CacheHitWindowPct = clampPct(dHits / dQueries * 100)
+				m.CacheHitWindowQueries = dQueries
+				m.CacheHitWindowMeasured = true
 			}
 		}
 	}

@@ -52,6 +52,7 @@ func parseTRTLLMMetrics(m *metrics.WorkerMetrics, _ *metrics.WorkerMetrics, _ co
 	// KV cache hit rate (0.0-1.0 gauge → 0-100%)
 	if v, _, ok := pm.GetGaugeAny("trtllm_kv_cache_hit_rate"); ok {
 		m.CacheHitRatePct = v * 100
+		m.CacheHitReported = true
 	}
 
 	// TTFT/ITL: populate scalar fields and LatencySnapshots in one pass.

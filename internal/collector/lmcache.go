@@ -30,6 +30,7 @@ func parseLMCacheMetrics(m *metrics.WorkerMetrics, pm *metrics.ParsedMetrics) {
 	// Cache hit rate (0.0-1.0 → 0-100%)
 	if v, _, ok := pm.GetGaugeAny("lmcache_hit_rate"); ok {
 		m.CacheHitRatePct = v * 100
+		m.CacheHitReported = true
 	}
 
 	// Total cache store size in bytes

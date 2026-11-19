@@ -69,6 +69,7 @@ func parseNIMMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, prev
 	// Prefix cache hit rate (0.0-1.0 -> 0-100%)
 	if v, _, ok := pm.GetGaugeAny("gpu_prefix_cache_hit_rate"); ok {
 		m.CacheHitRatePct = v * 100
+		m.CacheHitReported = true
 	}
 
 	// TTFT/ITL: populate scalar fields and LatencySnapshots in one pass.
