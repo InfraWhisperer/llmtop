@@ -148,3 +148,70 @@ func TestModelGroup_TopTenants_NilWhenAbsent(t *testing.T) {
 		t.Errorf("expected nil TopTenants when no tenant labels, got %v", groups[0].TopTenants)
 	}
 }
+
+// issue #15: prefix-cache reuse must not inflate any displayed token rate.
+// A SGLang worker that reused 24_850 prompt tokens from cache while computing
+// 150 and generating 150 must present as 300 tok/s, not 25_150.
+func TestDisplayTokPerSec_ExcludesCacheReusedPrefill(t *testing.T) {
+	split := &WorkerMetrics{
+		ModelName:               "sglang-model",
+		Online:                  true,
+		Backend:                 BackendSGLang,
+		PromptTokPerSec:         25_000,
+		PrefillComputeTokPerSec: 150,
+		PrefillCacheTokPerSec:   24_850,
+		PrefillSplit:            true,
+		GenTokPerSec:            150,
+	}
+	if got := split.DisplayTokPerSec(); got != 300 {
+		t.Errorf("DisplayTokPerSec = %f, want 300 (compute + generation only)", got)
+	}
+
+	// vLLM reports no split: its whole prompt side was computed, so the
+	// display rate must keep the full prompt number rather than 0.
+	unsplit := &WorkerMetrics{
+		ModelName:       "vllm-model",
+		Online:          true,
+		Backend:         BackendVLLM,
+		PromptTokPerSec: 800,
+		GenTokPerSec:    40,
+	}
+	if got := unsplit.DisplayTokPerSec(); got != 840 {
+		t.Errorf("DisplayTokPerSec (no split) = %f, want 840", got)
+	}
+
+	summary := ComputeFleetSummary([]*WorkerMetrics{split, unsplit})
+	if summary.TotalTokPerSec != 1140 {
+		t.Errorf("fleet TotalTokPerSec = %f, want 1140", summary.TotalTokPerSec)
+	}
+
+	groups := GroupWorkersByModel([]*WorkerMetrics{split})
+	if len(groups) != 1 {
+		t.Fatalf("expected 1 model group, got %d", len(groups))
+	}
+	if groups[0].TotalTokPerSec != 300 {
+		t.Errorf("model group TotalTokPerSec = %f, want 300", groups[0].TotalTokPerSec)
+	}
+}
+
+// A split backend that goes idle keeps PrefillSplit true with both halves 0;
+// the rate must read as a real 0 and not fall back to the inflated total.
+func TestDisplayTokPerSec_IdleSplitWorkerIsZero(t *testing.T) {
+	w := &WorkerMetrics{PromptTokPerSec: 25_000, PrefillSplit: true}
+	if got := w.DisplayTokPerSec(); got != 0 {
+		t.Errorf("DisplayTokPerSec = %f, want 0 for an idle split window", got)
+	}
+}
+
+// issue #15 (hit-rate axis): the windowed delta rate wins over the lifetime
+// cumulative ratio, which can hide a recent collapse at ~89% reuse.
+func TestCacheHitDisplayPct_PrefersWindowOverCumulative(t *testing.T) {
+	w := &WorkerMetrics{CacheHitRatePct: 89, CacheHitWindowPct: 12}
+	if got := w.CacheHitDisplayPct(); got != 12 {
+		t.Errorf("CacheHitDisplayPct = %f, want the windowed 12 percent rate", got)
+	}
+	backfilled := &WorkerMetrics{CacheHitRatePct: 89}
+	if got := backfilled.CacheHitDisplayPct(); got != 89 {
+		t.Errorf("CacheHitDisplayPct = %f, want the cumulative fallback", got)
+	}
+}

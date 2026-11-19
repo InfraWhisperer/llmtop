@@ -97,8 +97,9 @@ func TestTritonRateCalculation(t *testing.T) {
 		LastSeen: time.Now().Add(-2 * time.Second),
 	}
 	prevCounters := counterState{
-		promptTokensTotal: 450,  // prev nv_inference_request_success
-		genTokensTotal:    2000, // prev nv_inference_count
+		promptTokensTotal: 450,                              // prev nv_inference_request_success
+		genTokensTotal:    2000,                             // prev nv_inference_count
+		ts:                time.Now().Add(-2 * time.Second), // issue #15: dt source
 	}
 
 	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:8002", Online: true}

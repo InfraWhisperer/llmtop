@@ -129,8 +129,9 @@ func TestTGIRateCalculation(t *testing.T) {
 		LastSeen: time.Now().Add(-2 * time.Second),
 	}
 	prevCounters := counterState{
-		promptTokensTotal: 16000, // prev tgi_request_input_length_sum
-		genTokensTotal:    10500, // prev tgi_request_generated_tokens_sum
+		promptTokensTotal: 16000,                            // prev tgi_request_input_length_sum
+		genTokensTotal:    10500,                            // prev tgi_request_generated_tokens_sum
+		ts:                time.Now().Add(-2 * time.Second), // issue #15: dt source
 	}
 
 	m := &metrics.WorkerMetrics{Endpoint: "http://localhost:3000", Online: true}

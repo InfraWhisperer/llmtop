@@ -71,33 +71,30 @@ func parseLiteLLMMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, 
 		m.ITL_P99 = p99 * 1000
 	}
 
-	// Token throughput from counters
-	if prev != nil && prev.Online {
-		dt := time.Since(prev.LastSeen).Seconds()
-		if dt > 0 {
-			if v, _, ok := pm.GetGaugeAny("litellm_input_tokens_metric"); ok {
-				m.PromptTokPerSec = (v - prevCounters.promptTokensTotal) / dt
-				if m.PromptTokPerSec < 0 {
-					m.PromptTokPerSec = 0
-				}
-			}
-			if v, _, ok := pm.GetGaugeAny("litellm_output_tokens_metric"); ok {
-				m.GenTokPerSec = (v - prevCounters.genTokensTotal) / dt
-				if m.GenTokPerSec < 0 {
-					m.GenTokPerSec = 0
-				}
-			}
+	// Token throughput from counters, read series by series (LiteLLM fans these
+	// out per model/key), with dt from the previous counter snapshot (issue #15).
+	now := time.Now()
+	input, inputTotal, okInput := pm.GaugeSeries("litellm_input_tokens_metric", nil)
+	output, outputTotal, okOutput := pm.GaugeSeries("litellm_output_tokens_metric", nil)
+	dt, windowOK := prevCounters.rateWindow(now)
+	if prev != nil && prev.Online && windowOK {
+		if okInput {
+			m.PromptTokPerSec = seriesRate(prevCounters.promptSeries, input, prevCounters.promptTokensTotal, inputTotal, dt)
+		}
+		if okOutput {
+			m.GenTokPerSec = seriesRate(prevCounters.genSeries, output, prevCounters.genTokensTotal, outputTotal, dt)
 		}
 	}
 
-	// Store raw counters for next rate calculation
+	// Store per-series raw counters (with sample timestamp) for next rate calc
 	var counters counterState
-	if v, _, ok := pm.GetGaugeAny("litellm_input_tokens_metric"); ok {
-		counters.promptTokensTotal = v
+	if okInput {
+		counters.promptSeries, counters.promptTokensTotal = input, inputTotal
 	}
-	if v, _, ok := pm.GetGaugeAny("litellm_output_tokens_metric"); ok {
-		counters.genTokensTotal = v
+	if okOutput {
+		counters.genSeries, counters.genTokensTotal = output, outputTotal
 	}
+	counters.ts = now
 
 	return counters
 }

@@ -43,7 +43,7 @@ func GroupWorkersByModel(workers []*WorkerMetrics) []ModelGroup {
 		g.total++
 		if w.Online {
 			g.online++
-			workerTok := w.PromptTokPerSec + w.GenTokPerSec
+			workerTok := w.DisplayTokPerSec()
 			g.tokPerSec += workerTok
 			g.kvSum += w.KVCacheUsagePct
 			g.queue += w.RequestsWaiting

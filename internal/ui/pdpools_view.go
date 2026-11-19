@@ -136,7 +136,7 @@ func renderPrefillCard(w *metrics.WorkerMetrics, cardWidth int) string {
 	}
 	lines = append(lines, cardRow("KV xfer lat", xferStr, innerWidth))
 
-	tokTotal := w.PromptTokPerSec + w.GenTokPerSec
+	tokTotal := w.DisplayTokPerSec()
 	lines = append(lines, cardRow("Tok/s out", formatThroughput(tokTotal), innerWidth))
 
 	content := strings.Join(lines, "\n")
@@ -281,10 +281,10 @@ func computeIdealRatio(prefill, decode []*metrics.WorkerMetrics) string {
 
 	var sumPrefillTok, sumDecodeTok float64
 	for _, w := range prefill {
-		sumPrefillTok += w.PromptTokPerSec + w.GenTokPerSec
+		sumPrefillTok += w.DisplayTokPerSec()
 	}
 	for _, w := range decode {
-		sumDecodeTok += w.PromptTokPerSec + w.GenTokPerSec
+		sumDecodeTok += w.DisplayTokPerSec()
 	}
 
 	if sumDecodeTok == 0 {

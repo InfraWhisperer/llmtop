@@ -77,33 +77,31 @@ func parseNIMMetrics(m *metrics.WorkerMetrics, prev *metrics.WorkerMetrics, prev
 		[]string{"time_per_output_token_seconds"},
 	)
 
-	// Token throughput: counter-delta rate computation.
-	if prev != nil && prev.Online {
-		dt := time.Since(prev.LastSeen).Seconds()
-		if dt > 0 {
-			if v, _, ok := pm.GetGaugeAny("prompt_tokens_total"); ok {
-				m.PromptTokPerSec = (v - prevCounters.promptTokensTotal) / dt
-				if m.PromptTokPerSec < 0 {
-					m.PromptTokPerSec = 0
-				}
-			}
-			if v, _, ok := pm.GetGaugeAny("generation_tokens_total"); ok {
-				m.GenTokPerSec = (v - prevCounters.genTokensTotal) / dt
-				if m.GenTokPerSec < 0 {
-					m.GenTokPerSec = 0
-				}
-			}
+	// Token throughput: counter-delta rates, read series by series (NIM fans the
+	// token counters out per model), with dt from the previous counter snapshot
+	// (issue #15).
+	now := time.Now()
+	prompt, promptTotal, okPrompt := pm.GaugeSeries("prompt_tokens_total", nil)
+	gen, genTotal, okGen := pm.GaugeSeries("generation_tokens_total", nil)
+	dt, windowOK := prevCounters.rateWindow(now)
+	if prev != nil && prev.Online && windowOK {
+		if okPrompt {
+			m.PromptTokPerSec = seriesRate(prevCounters.promptSeries, prompt, prevCounters.promptTokensTotal, promptTotal, dt)
+		}
+		if okGen {
+			m.GenTokPerSec = seriesRate(prevCounters.genSeries, gen, prevCounters.genTokensTotal, genTotal, dt)
 		}
 	}
 
-	// Store raw counters for next delta.
+	// Store per-series raw counters (with sample timestamp) for next delta.
 	var counters counterState
-	if v, _, ok := pm.GetGaugeAny("prompt_tokens_total"); ok {
-		counters.promptTokensTotal = v
+	if okPrompt {
+		counters.promptSeries, counters.promptTokensTotal = prompt, promptTotal
 	}
-	if v, _, ok := pm.GetGaugeAny("generation_tokens_total"); ok {
-		counters.genTokensTotal = v
+	if okGen {
+		counters.genSeries, counters.genTokensTotal = gen, genTotal
 	}
+	counters.ts = now
 
 	return counters
 }
